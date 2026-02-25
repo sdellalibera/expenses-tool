@@ -1,4 +1,3 @@
 <Solution>
-  <Project Path="ContentUnderstanding.Client.Tests/ContentUnderstanding.Client.Tests.csproj" />
   <Project Path="ContentUnderstanding.Client/ContentUnderstanding.Client.csproj" />
 </Solution>
