@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Azure.Core;
 using ContentUnderstanding.Client.Models;
 
 namespace ContentUnderstanding.Client;
@@ -15,6 +16,8 @@ public class ContentUnderstandingClient : IDisposable
     private readonly string _endpoint;
     private readonly string _apiVersion;
     private readonly bool _ownsHttpClient;
+
+    private const string DefaultScope = "https://cognitiveservices.azure.com/.default";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -33,6 +36,28 @@ public class ContentUnderstandingClient : IDisposable
     public ContentUnderstandingClient(string endpoint, string apiKey, string apiVersion = "2024-12-01-preview")
         : this(endpoint, apiKey, apiVersion, httpClient: null)
     {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="ContentUnderstandingClient"/>
+    /// using a <see cref="TokenCredential"/> (e.g. <c>DefaultAzureCredential</c>) for
+    /// Microsoft Entra ID (Azure AD) authentication instead of an API key.
+    /// </summary>
+    /// <param name="endpoint">The Azure AI Content Understanding service endpoint URL.</param>
+    /// <param name="credential">The <see cref="TokenCredential"/> used to authenticate requests.</param>
+    /// <param name="apiVersion">The API version to use (default: 2024-12-01-preview).</param>
+    public ContentUnderstandingClient(string endpoint, TokenCredential credential, string apiVersion = "2024-12-01-preview")
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
+        ArgumentNullException.ThrowIfNull(credential);
+        ArgumentException.ThrowIfNullOrWhiteSpace(apiVersion);
+
+        _endpoint = endpoint.TrimEnd('/');
+        _apiVersion = apiVersion;
+
+        var handler = new BearerTokenHandler(credential, [DefaultScope]);
+        _httpClient = new HttpClient(handler);
+        _ownsHttpClient = true;
     }
 
     /// <summary>

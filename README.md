@@ -1,175 +1,100 @@
-# Azure AI Content Understanding Client
+# Azure AI Document Toolkit
 
-A custom .NET client library for interacting with the [Azure AI Content Understanding REST API](https://learn.microsoft.com/en-us/rest/api/content-understanding/). This client supports analyzing content from URLs and **local files/directories**.
+Demos and utilities for **Azure AI Content Understanding** and **Azure AI Document Intelligence** using .NET.
 
-## Features
+## Repository Structure
 
-- **Create, retrieve, and delete analyzers** for document, image, audio, and video content
-- **Analyze content from URLs** by providing a public content URL
-- **Analyze content from local files** by reading files and sending them as base64-encoded data
-- **Batch-process files in a local directory** with configurable search patterns and subdirectory support
-- **Automatic result polling** with configurable intervals
-- Built-in MIME type detection for common file formats
-- Strongly typed request/response models
+```
+├── content-understanding/              # Content Understanding demos & client
+│   ├── client/                         # Custom .NET client library for the CU REST API
+│   │   ├── ContentUnderstandingClient.cs
+│   │   ├── ContentUnderstandingException.cs
+│   │   ├── BearerTokenHandler.cs
+│   │   ├── MimeTypeHelper.cs
+│   │   └── Models/
+│   │       ├── AnalyzerDefinition.cs
+│   │       ├── AnalyzerResponse.cs
+│   │       ├── AnalyzeRequest.cs
+│   │       ├── AnalyzeResult.cs
+│   │       └── FieldSchema.cs
+│   └── contentunderstanding.cs         # Single-file demo (dotnet run)
+│
+├── document-intelligence/              # Document Intelligence demos
+│   └── documentIntelligence.cs         # Single-file demo (dotnet run)
+│
+├── analyzers/                          # Reusable custom analyzer definitions
+│   └── README.md
+│
+├── ContentUnderstanding.slnx           # Solution file
+└── README.md                           # This file
+```
 
 ## Prerequisites
 
-- [.NET 8.0 SDK](https://dotnet.microsoft.com/download) or later
-- An Azure subscription with an [Azure AI Content Understanding](https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/) resource
-- Your resource endpoint and API key
+- [.NET 10 SDK](https://dotnet.microsoft.com/download) or later (single-file demos use .NET 10 `#:` directives)
+- [.NET 8.0 SDK](https://dotnet.microsoft.com/download) (for the client library)
+- An Azure subscription with:
+  - [Azure AI Content Understanding](https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/) resource
+  - [Azure AI Document Intelligence](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/) resource
 
 ## Getting Started
 
-### 1. Build the project
+### Build the client library
 
 ```bash
 dotnet build
 ```
 
-### 2. Run the tests
+### Run a Content Understanding demo
 
 ```bash
-dotnet test
+cd content-understanding
+dotnet run contentunderstanding.cs
 ```
 
-### 3. Reference the library
-
-Add a project reference to `ContentUnderstanding.Client` from your application:
+### Run a Document Intelligence demo
 
 ```bash
-dotnet add reference ../ContentUnderstanding.Client/ContentUnderstanding.Client.csproj
+cd document-intelligence
+dotnet run documentIntelligence.cs
 ```
 
-## Usage
+## Content Understanding Client
 
-### Initialize the client
+The custom client library under `content-understanding/client/` wraps the [Azure AI Content Understanding REST API](https://learn.microsoft.com/en-us/rest/api/content-understanding/) and supports:
+
+- **Create, retrieve, and delete analyzers** for document, image, audio, and video content
+- **Analyze content from URLs** or **local files/directories**
+- **Automatic result polling** with configurable intervals
+- **Analyzer configuration** for OCR, face detection, and detailed results
+- Built-in MIME type detection, strongly typed models, and `IDisposable` support
+
+### Quick example
 
 ```csharp
+using Azure.Identity;
 using ContentUnderstanding.Client;
 
 var endpoint = "https://<your-resource>.cognitiveservices.azure.com";
-var apiKey = "<your-api-key>";
+using var client = new ContentUnderstandingClient(endpoint, new DefaultAzureCredential());
 
-using var client = new ContentUnderstandingClient(endpoint, apiKey);
+var result = await client.AnalyzeContentFromFileAsync("my-analyzer", "/path/to/file.pdf");
 ```
 
-### Create an analyzer
-
-```csharp
-using ContentUnderstanding.Client.Models;
-
-var definition = new AnalyzerDefinition
-{
-    Description = "Invoice field extractor",
-    Scenario = "document",
-    FieldSchema = new FieldSchema
-    {
-        Fields = new Dictionary<string, FieldDefinition>
-        {
-            ["InvoiceNumber"] = new() { Type = "string", Description = "The invoice number" },
-            ["TotalAmount"] = new() { Type = "number", Description = "Total amount due" },
-            ["InvoiceDate"] = new() { Type = "date", Description = "Date of the invoice" }
-        }
-    }
-};
-
-var analyzer = await client.CreateOrReplaceAnalyzerAsync("my-invoice-analyzer", definition);
-```
-
-### Analyze content from a URL
-
-```csharp
-var result = await client.AnalyzeContentFromUrlAsync(
-    "my-invoice-analyzer",
-    "https://example.com/invoice.pdf");
-
-Console.WriteLine($"Status: {result.Status}");
-```
-
-### Analyze a local file
-
-```csharp
-var result = await client.AnalyzeContentFromFileAsync(
-    "my-invoice-analyzer",
-    "/path/to/invoice.pdf");
-
-if (result.Status == "Succeeded" && result.Result?.Contents != null)
-{
-    foreach (var content in result.Result.Contents)
-    {
-        Console.WriteLine(content.Markdown);
-
-        if (content.Fields != null)
-        {
-            foreach (var (name, value) in content.Fields)
-            {
-                Console.WriteLine($"  {name}: {value.ValueString}");
-            }
-        }
-    }
-}
-```
-
-### Process all files in a directory
-
-```csharp
-var results = await client.AnalyzeFilesInDirectoryAsync(
-    "my-invoice-analyzer",
-    "/path/to/invoices",
-    searchPattern: "*.pdf",
-    includeSubdirectories: true);
-
-foreach (var (filePath, result) in results)
-{
-    Console.WriteLine($"{filePath}: {result.Status}");
-}
-```
-
-### Delete an analyzer
-
-```csharp
-await client.DeleteAnalyzerAsync("my-invoice-analyzer");
-```
-
-## API Reference
-
-### `ContentUnderstandingClient`
+### API Reference
 
 | Method | Description |
 |--------|-------------|
-| `CreateOrReplaceAnalyzerAsync` | Creates or replaces an analyzer with the given definition |
-| `GetAnalyzerAsync` | Retrieves configuration of an existing analyzer |
+| `CreateOrReplaceAnalyzerAsync` | Creates or replaces an analyzer |
+| `GetAnalyzerAsync` | Retrieves an existing analyzer |
 | `DeleteAnalyzerAsync` | Deletes an analyzer |
-| `AnalyzeContentFromUrlAsync` | Analyzes content at a given URL |
-| `AnalyzeContentFromFileAsync` | Reads a local file and analyzes it |
-| `AnalyzeFilesInDirectoryAsync` | Processes all matching files in a directory |
+| `AnalyzeContentFromUrlAsync` | Analyzes content at a URL |
+| `AnalyzeContentFromFileAsync` | Analyzes a local file |
+| `AnalyzeFilesInDirectoryAsync` | Batch-processes files in a directory |
 
-### Configuration
+## Custom Analyzers
 
-The client accepts an optional `apiVersion` parameter (default: `2024-12-01-preview`):
-
-```csharp
-var client = new ContentUnderstandingClient(endpoint, apiKey, apiVersion: "2025-05-01-preview");
-```
-
-## Project Structure
-
-```
-├── ContentUnderstanding.Client/          # Client library
-│   ├── ContentUnderstandingClient.cs     # Main client class
-│   ├── ContentUnderstandingException.cs  # Custom exception type
-│   ├── MimeTypeHelper.cs                # MIME type resolution
-│   └── Models/                          # Request/response models
-│       ├── AnalyzerDefinition.cs
-│       ├── AnalyzerResponse.cs
-│       ├── AnalyzeRequest.cs
-│       ├── AnalyzeResult.cs
-│       └── FieldSchema.cs
-├── ContentUnderstanding.Client.Tests/    # Unit tests
-│   ├── ContentUnderstandingClientTests.cs
-│   └── MimeTypeHelperTests.cs
-└── ContentUnderstanding.slnx             # Solution file
-```
+The `analyzers/` folder contains reusable custom analyzer definitions you can use locally or share across demos.
 
 ## License
 
