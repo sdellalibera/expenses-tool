@@ -7,7 +7,7 @@ using Azure;
 
 //var endpoint = "https://<endpoint>.cognitiveservices.azure.com";
 var endpoint = "https://sdellaliberadocintelligence.cognitiveservices.azure.com";
-var blobContainerEndpoint = "";
+//var ContainerEndpoint = "";
 
 var credential = new DefaultAzureCredential();
 
