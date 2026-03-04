@@ -1,6 +1,6 @@
-# Azure AI Document Toolkit
+# Azure AI Document
 
-A comprehensive toolkit and demo repository for working with **Azure AI Content Understanding** and **Azure AI Document Intelligence** using .NET. This repository provides infrastructure-as-code templates, sample applications, and reusable components for building intelligent document processing solutions.
+A comprehensive demo repository for working with **Azure AI Content Understanding** and **Azure AI Document Intelligence** using .NET. This repository provides infrastructure-as-code templates, sample applications, and reusable components for building intelligent document processing solutions.
 
 ## What is this repository for?
 
