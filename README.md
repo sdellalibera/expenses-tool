@@ -33,9 +33,41 @@ Demos and utilities for **Azure AI Content Understanding** and **Azure AI Docume
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download) or later (single-file demos use .NET 10 `#:` directives)
 - [.NET 8.0 SDK](https://dotnet.microsoft.com/download) (for the client library)
+- [Azure Developer CLI (azd)](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd) for infrastructure deployment
 - An Azure subscription with:
   - [Azure AI Content Understanding](https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/) resource
   - [Azure AI Document Intelligence](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/) resource
+
+## Deployment
+
+### Deploy Infrastructure with Azure Developer CLI
+
+Simple one-command deployment:
+
+```bash
+# Login to Azure (first time only)
+azd auth login
+
+# Set your user principal ID for storage access (optional but recommended)
+azd env set AZURE_PRINCIPAL_ID $(az ad signed-in-user show --query id -o tsv)
+
+# Deploy everything
+azd up
+
+# Tear down when done
+azd down
+```
+
+This deploys:
+- Azure AI Document Intelligence (Form Recognizer)
+- Azure AI Services with GPT-4.1, GPT-4.1-mini, and text-embedding-3-large models
+- Azure Storage Account with a 'files' container
+
+**Permissions configured:**
+- AI Services gets **Reader** role on the Storage Account
+- Your user gets **Storage Blob Data Contributor** role for uploading files
+
+All resource names are auto-generated with unique suffixes.
 
 ## Getting Started
 

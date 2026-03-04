@@ -1,0 +1,57 @@
+{
+	"analyzerId": "CustomAnalyzerMixedData",
+	"description": "",
+	"createdAt": "2026-03-03T16:59:25Z",
+	"lastModifiedAt": "2026-03-03T16:59:25Z",
+	"baseAnalyzerId": "prebuilt-document",
+	"config": {
+		"returnDetails": true,
+		"enableOcr": true,
+		"enableLayout": true,
+		"enableFormula": true,
+		"enableFigureDescription": true,
+		"enableFigureAnalysis": true,
+		"chartFormat": "chartjs",
+		"tableFormat": "html",
+		"contentCategories": {
+			"Hotel": {
+				"description": "This analyzer is used when an hotel receipt is detected",
+				"analyzerId": "prebuilt-receipt.hotel"
+			},
+			"Payslip": {
+				"description": "This analyzer is used when a payslip is detected",
+				"analyzerId": "prebuilt-payStub.us"
+			},
+			"Invoice": {
+				"description": "This analyzer is used when ",
+				"analyzerId": "prebuilt-invoice"
+			}
+		},
+		"enableSegment": false,
+		"omitContent": false,
+		"segmentPerPage": false,
+		"annotationFormat": "markdown"
+	},
+	"warnings": [],
+	"status": "ready",
+	"processingLocation": "geography",
+	"supportedModels": {
+		"completion": [
+			"gpt-4o",
+			"gpt-4o-mini",
+			"gpt-4.1",
+			"gpt-4.1-mini",
+			"gpt-4.1-nano"
+		],
+		"embedding": [
+			"text-embedding-3-small",
+			"text-embedding-3-large",
+			"text-embedding-ada-002"
+		]
+	},
+	"models": {
+		"completion": "gpt-4.1",
+		"embedding": "text-embedding-3-large"
+	},
+	"fieldSchema": {}
+}
