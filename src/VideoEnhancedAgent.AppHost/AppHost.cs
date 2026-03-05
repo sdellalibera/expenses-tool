@@ -28,6 +28,8 @@ var server = builder.AddProject<Projects.VideoEnhancedAgent_Server>("server")
     .WithHttpHealthCheck("/health")
     .WithExternalHttpEndpoints();
 
+
+
 //Function for triggering analysis of videos uploaded into input container
 var function = builder.AddAzureFunctionsProject<Projects.azure_function>("functions")
     .WithReference(container_input)
