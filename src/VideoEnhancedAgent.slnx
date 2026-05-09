@@ -1,9 +1,0 @@
-<Solution>
-  <Project Path="frontend/frontend.esproj">
-    <Build />
-  </Project>
-  <Project Path="VideoEnhancedAgent.AppHost/VideoEnhancedAgent.AppHost.csproj" />
-  <Project Path="VideoEnhancedAgent.Server/VideoEnhancedAgent.Server.csproj" />
-  <Project Path="frontend\frontend.esproj" />
-  <Project Path="src\azure-function\azure-function.csproj"/>
-</Solution>
