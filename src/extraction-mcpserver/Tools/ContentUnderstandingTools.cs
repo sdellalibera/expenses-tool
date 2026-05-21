@@ -13,7 +13,7 @@ internal class ContentUnderstandingTools
         [Description("Path of the document that has to be analyzed")] string url)
     {
         var uri = new Uri(url);
-        
+        //returns null because still needs to be implemented
         return null;
     }
 }
