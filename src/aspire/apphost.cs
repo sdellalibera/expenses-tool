@@ -16,15 +16,21 @@ var existingFoundryName = builder.AddParameter("existingFoundryName");
 var existingFoundryResourceGroup = builder.AddParameter("existingFoundryResourceGroup");
 var foundry = builder.AddFoundry("foundry").RunAsExisting(existingFoundryName,existingFoundryResourceGroup);
 
-var cosmosDB = builder.AddAzureCosmosDB("cosmosDB");
-
-var knowledge = cosmosDB.AddCosmosDatabase("knowledge");
+//subject to removal or change in future, requires pragma
+#pragma warning disable ASPIRECOSMOSDB001
+var cosmos = builder.AddAzureCosmosDB("cosmos")
+    .RunAsPreviewEmulator(
+        emulator =>
+        {
+            emulator.WithDataExplorer();
+            emulator.WithLifetime(ContainerLifetime.Persistent);
+        });
 
 var mcpserver = builder.AddProject<Projects.extraction_mcpserver>("mcpserver")
     .WithReference(foundry);
 
 var extraction_agent = builder.AddProject<Projects.extraction_agent>("extraction-agent")
-    .WithReference(cosmosDB)
+    .WithReference(cosmos)
     .WithReference(mcpserver);
 
 builder.Build().Run();

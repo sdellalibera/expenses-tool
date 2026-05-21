@@ -10,7 +10,7 @@ builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
 builder.Services.AddAzureClients(clients =>
 {
-   clients.AddContentUnderstandingClient(new Uri(builder.Configuration["ContentUnderstanding:Endpoint"]
+   clients.AddContentUnderstandingClient(new Uri(builder.Configuration["FOUNDRY_URI"]
     ?? throw new InvalidOperationException("Content Understanding endpoint not set."))); 
 });
 
