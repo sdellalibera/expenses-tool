@@ -1,6 +1,0 @@
-<Solution>
-  <Project Path="extraction-agent/extraction-agent.csproj" />
-  <Project Path="servicedefaults/servicedefaults.csproj" />
-  <Project Path="extraction-mcpserver/extraction-mcpserver.csproj" />
-
-</Solution>
