@@ -41,4 +41,39 @@ internal class ContentUnderstandingTools
         AnalysisContent content = result.Contents!.First();
         return content.Markdown ?? string.Empty;
     }
+
+    [McpServerTool]
+    [Description("Analyzes a document at a publicly accessible URL with Azure AI Content Understanding and returns LLM-ready markdown text.")]
+    public async Task<string> AnalyzeDocumentByUrl(
+        ContentUnderstandingClient client,
+        [Description("Publicly accessible URL of the document (PDF, image, Office document, etc.) to analyze.")] string url,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            throw new ArgumentException("URL must be provided.", nameof(url));
+        }
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uriSource))
+        {
+            throw new ArgumentException($"Invalid absolute URL: {url}", nameof(url));
+        }
+
+        Operation<AnalysisResult> operation = await client.AnalyzeAsync(
+            WaitUntil.Completed,
+            "prebuilt-documentSearch",
+            inputs: new[]
+            {
+                new AnalysisInput
+                {
+                    Uri = uriSource
+                }
+            },
+            cancellationToken: cancellationToken);
+
+        AnalysisResult result = operation.Value;
+
+        AnalysisContent content = result.Contents!.First();
+        return content.Markdown ?? string.Empty;
+    }
 }

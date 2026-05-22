@@ -30,6 +30,7 @@ var mcpserver = builder.AddProject<Projects.extraction_mcpserver>("mcpserver")
     .WithReference(foundry);
 
 var extraction_agent = builder.AddProject<Projects.extraction_agent>("extraction-agent")
+    .WithReference(foundry)
     .WithReference(cosmos)
     .WithReference(mcpserver);
 
