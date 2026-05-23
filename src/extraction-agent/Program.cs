@@ -14,7 +14,7 @@ builder.Services.AddOpenApi();
 
 builder.AddAzureOpenAIClient(connectionName:"foundry").AddChatClient("gpt-5.4");
 
-var mcpserverUrl = Environment.GetEnvironmentVariable("") ?? throw new InvalidOperationException ("Could not resolve MCP server URL");
+var mcpserverUrl = Environment.GetEnvironmentVariable("MCPSERVER_HTTP") ?? throw new InvalidOperationException ("Could not resolve MCP server URL");
 
 var mcpEndpoint = new Uri(new Uri(mcpserverUrl),"/mcp");
 
@@ -37,6 +37,7 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
+
 
 
 app.UseHttpsRedirection();
