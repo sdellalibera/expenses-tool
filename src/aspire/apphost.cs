@@ -1,4 +1,5 @@
 ﻿#:package Aspire.Hosting.Azure.CosmosDB@13.3.5
+#:package Aspire.Hosting.Azure.Storage@13.3.5
 #:package Aspire.Hosting.Foundry@13.3.0-preview.1.26256.5
 
 #:sdk Aspire.AppHost.Sdk@13.3.0
@@ -30,9 +31,22 @@ var db = cosmos.AddCosmosDatabase("db");
 var sessions = db.AddContainer("sessions","/sessionsId");
 var conversations = db.AddContainer("conversations","/conversationsId");
 
+// Local Azurite-based Azure Storage emulator. Runs as a container using the
+// configured container runtime (Docker or Podman). The "faces" blob container
+// stores face images that are referenced from the Content Understanding
+// Person Directory APIs (see PersonDirectoryTools in the mcpserver project).
+var storage = builder.AddAzureStorage("storage")
+    .RunAsEmulator(emulator =>
+    {
+        emulator.WithLifetime(ContainerLifetime.Persistent);
+    });
+
+var facesContainer = storage.AddBlobContainer("faces");
+
 var mcpserver = builder.AddProject<Projects.extraction_mcpserver>("mcpserver")
     .WithHttpEndpoint()
-    .WithReference(foundry).WaitFor(foundry);
+    .WithReference(foundry).WaitFor(foundry)
+    .WithReference(facesContainer).WaitFor(facesContainer);
 
 var extraction_agent = builder.AddProject<Projects.extraction_agent>("extraction-agent")
     .WithReference(foundry).WaitFor(foundry)
