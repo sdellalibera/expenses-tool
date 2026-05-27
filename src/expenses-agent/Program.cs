@@ -1,7 +1,11 @@
 
 using Microsoft.Agents.AI;
+using Microsoft.Agents.AI.Hosting;
 using Microsoft.Extensions.AI;
 using ModelContextProtocol.Client;
+using Microsoft.Agents.AI.Hosting.A2A;
+using A2A.AspNetCore;
+using A2A;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -30,6 +34,11 @@ builder.Services.AddSingleton(mcpClient);
 
 var app = builder.Build();
 
+app.MapA2A(agent,"/a2a/expenses-agent",AgentCard: new()
+{
+    
+});
+
 app.MapDefaultEndpoints();
 
 // Configure the HTTP request pipeline.
@@ -37,8 +46,6 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
-
-
 
 app.UseHttpsRedirection();
 
