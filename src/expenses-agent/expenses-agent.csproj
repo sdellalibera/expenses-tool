@@ -9,9 +9,9 @@
 
   <ItemGroup>
     <PackageReference Include="Aspire.Azure.AI.OpenAI" Version="9.4.1-preview.1.25408.4" />
-    <PackageReference Include="Microsoft.Agents.AI" Version="1.6.2" />
+    <PackageReference Include="Microsoft.Agents.AI" Version="1.7.0" />
     <PackageReference Include="Microsoft.Agents.AI.Hosting.A2A.AspNetCore" Version="1.7.0-preview.260526.1" />
-    <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.6.2" />
+    <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.7.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.7" />
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.6.0" />
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.6.0" />
@@ -20,6 +20,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\servicedefaults\servicedefaults.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Prompts\SystemPrompt.md">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>

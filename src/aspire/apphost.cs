@@ -108,6 +108,7 @@ var expensesAgent = builder.AddProject<Projects.expenses_agent>("expenses-agent"
     .WithReference(foundry).WaitFor(foundry)
     .WithReference(conversations).WaitFor(conversations)
     .WithReference(mcpserver).WaitFor(mcpserver)
+    .WithEnvironment("MCPSERVER_HTTP", mcpserver.GetEndpoint("http"))
     .WithEnvironment("SQL_MCP_HTTP", sqlMcp.GetEndpoint("http"))
     .WaitFor(sqlMcp);
 
