@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Reflection.Metadata.Ecma335;
 using Azure;
 using Azure.AI.ContentUnderstanding;
 using ModelContextProtocol.Server;
@@ -35,16 +36,13 @@ internal class ContentUnderstandingTools
             cancellationToken: cancellationToken);
 
         AnalysisResult result = operation.Value;
-        AnalyzeUsageDetails? usage = operation.GetUsage();
 
         return result.ToLlmInput(
-            metadata: new Dictionary<string, object>
+            options: new LlmInputOptions
             {
-                ["source"] = path,
-                ["tokensConsumed"] = usage?.Tokens is { Count: > 0 } tokens
-                    ? (object)tokens
-                    : "unavailable",
-            });
+                IncludeMarkdown = false
+            }
+        );
     }
 
     [McpServerTool]
@@ -77,15 +75,12 @@ internal class ContentUnderstandingTools
             cancellationToken: cancellationToken);
 
         AnalysisResult result = operation.Value;
-        AnalyzeUsageDetails? usage = operation.GetUsage();
 
         return result.ToLlmInput(
-            metadata: new Dictionary<string, object>
+            options: new LlmInputOptions
             {
-                ["source"] = url,
-                ["tokensConsumed"] = usage?.Tokens is { Count: > 0 } tokens
-                    ? (object)tokens
-                    : "unavailable",
-            });
+                IncludeMarkdown = false
+            }
+        );
     }
 }

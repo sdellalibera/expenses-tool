@@ -1,7 +1,7 @@
-namespace content_understanding.models;
+namespace agents.models;
 
 /// <summary>
 /// Represents the response returned by the expenses agent.
 /// </summary>
 /// <param name="Reply">The agent's reply text.</param>
-public record ChatResponse(string Reply);
+public record AgentChatResponse(string Reply);

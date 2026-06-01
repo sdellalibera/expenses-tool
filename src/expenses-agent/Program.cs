@@ -1,6 +1,5 @@
-using A2A;
-using A2A.AspNetCore;
-using content_understanding.models;
+using agents.models;
+using Azure.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Hosting;
@@ -19,44 +18,52 @@ builder.AddServiceDefaults();
 
 builder.Services.AddOpenApi();
 
-builder.AddAzureOpenAIClient(connectionName: "foundry").AddChatClient("gpt-5.4");
+builder.AddAzureChatCompletionsClient(connectionName: "foundry",
+    configureSettings: settings =>
+    {
+        settings.TokenCredential = new DefaultAzureCredential();
+        settings.EnableSensitiveTelemetryData = true;
+    })
+    .AddChatClient("gpt-5.4");
 
-// Resolve both MCP server endpoints from the AppHost-injected environment variables.
-var contentUnderstandingMcpUrl = Environment.GetEnvironmentVariable("MCPSERVER_HTTP")
-    ?? throw new InvalidOperationException("MCPSERVER_HTTP env var (Content Understanding MCP) is not set.");
-var sqlMcpUrl = Environment.GetEnvironmentVariable("SQL_MCP_HTTP")
-    ?? throw new InvalidOperationException("SQL_MCP_HTTP env var (DAB SQL MCP) is not set.");
+// Resolve the Content Understanding MCP server endpoint. Aspire's service
+// discovery injects "services__<resource>__<scheme>__0" env vars whenever the
+// agent declares .WithReference(mcpserver) in the AppHost.
+var contentUnderstandingMcpUrl =
+    Environment.GetEnvironmentVariable("services__mcpserver__https__0")
+    ?? Environment.GetEnvironmentVariable("services__mcpserver__http__0")
+    ?? Environment.GetEnvironmentVariable("MCPSERVER_HTTP")
+    ?? throw new InvalidOperationException(
+        "Could not resolve Content Understanding MCP server URL. " +
+        "Expected one of 'services__mcpserver__https__0', " +
+        "'services__mcpserver__http__0', or 'MCPSERVER_HTTP'.");
 
-var contentUnderstandingMcp = await McpClient.CreateAsync(new HttpClientTransport(new HttpClientTransportOptions
+var mcpClient = await McpClient.CreateAsync(new HttpClientTransport(new HttpClientTransportOptions
 {
     Endpoint = new Uri(new Uri(contentUnderstandingMcpUrl), "/mcp")
 }));
 
-var sqlMcp = await McpClient.CreateAsync(new HttpClientTransport(new HttpClientTransportOptions
-{
-    Endpoint = new Uri(new Uri(sqlMcpUrl), "/mcp")
-}));
+var mcpTools = await mcpClient.ListToolsAsync();
+List<AITool> agentTools = mcpTools.Cast<AITool>().ToList();
 
-// Merge tools from both MCP servers into a single tool list the agent can call.
-var tools = new List<AITool>();
-tools.AddRange(await contentUnderstandingMcp.ListToolsAsync());
-tools.AddRange(await sqlMcp.ListToolsAsync());
+builder.Services.AddSingleton(mcpClient);
 
-builder.Services.AddKeyedSingleton("content-understanding-mcp", contentUnderstandingMcp);
-builder.Services.AddKeyedSingleton("sql-mcp", sqlMcp);
-
-// Register the agent with the hosting infrastructure so A2A can resolve it by name.
-builder.AddAIAgent(AgentName, (sp, _) =>
+builder.AddAIAgent(AgentName, (sp, key) =>
 {
     var chatClient = sp.GetRequiredService<IChatClient>();
-    return chatClient.AsAIAgent(
-        instructions: agentInstructions,
-        name: AgentName,
-        description: "Ingests receipts/invoices via Content Understanding and persists them in SQL.",
-        tools: tools);
-});
+    var agentOptions = new ChatClientAgentOptions
+    {
+        Name = key,
+        Description = "Analyzes receipts/invoices via Content Understanding and returns structured data.",
+        ChatOptions = new ChatOptions
+        {
+            Instructions = agentInstructions,
+            Tools = agentTools
+        }
+    };
 
-builder.AddA2AServer(AgentName);
+    return chatClient.AsAIAgent(agentOptions, services: sp);
+});
 
 var app = builder.Build();
 
@@ -67,76 +74,19 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-// AgentCard advertised over A2A so other agents can discover this agent's
-// identity, capabilities, and skills.
-var agentCard = new AgentCard
-{
-    Name = AgentName,
-    Description = "Ingests receipts/invoices via Content Understanding and persists them in SQL.",
-    Version = "1.0.0",
-    DefaultInputModes = new List<string> { "text" },
-    DefaultOutputModes = new List<string> { "text" },
-    Capabilities = new AgentCapabilities
-    {
-        Streaming = false,
-        PushNotifications = false
-    },
-    Skills = new List<A2A.AgentSkill>
-    {
-        new()
-        {
-            Id = "ingest-invoice",
-            Name = "Ingest invoice or receipt",
-            Description = "Analyzes a receipt or invoice with Content Understanding and stores the structured result (documents, invoices, line items) in the expenses SQL database.",
-            Tags = new List<string> { "invoice", "receipt", "expenses", "content-understanding", "sql" },
-            Examples = new List<string>
-            {
-                "Process this receipt and add it to the expenses database.",
-                "Ingest the attached invoice PDF.",
-                "Analyze https://example.com/receipt.png and persist the line items."
-            },
-            InputModes = new List<string> { "text" },
-            OutputModes = new List<string> { "text" }
-        },
-        new()
-        {
-            Id = "query-expenses",
-            Name = "Query expenses",
-            Description = "Answers natural-language questions over the expenses SQL database (totals, vendors, dates, line items).",
-            Tags = new List<string> { "expenses", "sql", "query", "reporting" },
-            Examples = new List<string>
-            {
-                "What did I spend at Contoso last month?",
-                "List all invoices over $500.",
-                "Show line items for invoice #42."
-            },
-            InputModes = new List<string> { "text" },
-            OutputModes = new List<string> { "text" }
-        }
-    }
-};
-
-// A2A protocol surface for cross-agent communication. Uses the explicit
-// AgentCard so the well-known discovery endpoint advertises real metadata
-// rather than the framework's default placeholder card.
-var a2aServer = app.Services.GetRequiredKeyedService<A2AServer>(AgentName);
-app.MapHttpA2A((IA2ARequestHandler)a2aServer, agentCard, $"/a2a/{AgentName}");
-app.MapWellKnownAgentCard(agentCard);
-
-// Convenience single-turn chat endpoint for direct user testing.
-app.MapPost("/chat", async (
-    [FromBody] ChatRequest request,
-    [FromKeyedServices(AgentName)] AIAgent agent,
-    CancellationToken cancellationToken) =>
+app.MapPost("/chat", async (AgentChatRequest request, [FromKeyedServices(AgentName)] AIAgent agent, CancellationToken cancellationToken) =>
 {
     if (string.IsNullOrWhiteSpace(request.Message))
     {
-        return Results.BadRequest("Message must not be empty.");
+        return Results.BadRequest(new { error = "Message is required." });
     }
 
-    var session = await agent.CreateSessionAsync(cancellationToken);
-    var response = await agent.RunAsync(request.Message, session, cancellationToken: cancellationToken);
-    return Results.Ok(new content_understanding.models.ChatResponse(response.Text));
-});
+    var response = await agent.RunAsync(request.Message, cancellationToken: cancellationToken);
+    return Results.Ok(new AgentChatResponse(response.Text));
+})
+.WithName("Chat")
+.WithDescription("Sends a message to the expenses agent and returns its reply.");
 
 app.Run();
+
+
