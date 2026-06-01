@@ -9,7 +9,7 @@ using ModelContextProtocol.Server;
 internal class ContentUnderstandingTools
 {
     [McpServerTool]
-    [Description("Analyzes a document with Azure AI Content Understanding and returns LLM-ready markdown text.")]
+    [Description("Analyzes a document with Azure AI Content Understanding and returns extracted fields, source input, and token usage.")]
     public async Task<string> AnalyzeDocumentBytes(
         ContentUnderstandingClient client,
         [Description("Absolute path to the document file (PDF, image, Office document, etc.) to analyze.")] string path,
@@ -35,15 +35,20 @@ internal class ContentUnderstandingTools
             cancellationToken: cancellationToken);
 
         AnalysisResult result = operation.Value;
+        AnalyzeUsageDetails? usage = operation.GetUsage();
 
-        // A document produces a single AnalysisContent entry with markdown that is
-        // optimized for RAG / LLM consumption.
-        AnalysisContent content = result.Contents!.First();
-        return content.Markdown ?? string.Empty;
+        return result.ToLlmInput(
+            metadata: new Dictionary<string, object>
+            {
+                ["source"] = path,
+                ["tokensConsumed"] = usage?.Tokens is { Count: > 0 } tokens
+                    ? (object)tokens
+                    : "unavailable",
+            });
     }
 
     [McpServerTool]
-    [Description("Analyzes a document at a publicly accessible URL with Azure AI Content Understanding and returns LLM-ready markdown text.")]
+    [Description("Analyzes a document at a publicly accessible URL with Azure AI Content Understanding and returns extracted fields, source input, and token usage.")]
     public async Task<string> AnalyzeDocumentByUrl(
         ContentUnderstandingClient client,
         [Description("Publicly accessible URL of the document (PDF, image, Office document, etc.) to analyze.")] string url,
@@ -72,8 +77,15 @@ internal class ContentUnderstandingTools
             cancellationToken: cancellationToken);
 
         AnalysisResult result = operation.Value;
+        AnalyzeUsageDetails? usage = operation.GetUsage();
 
-        AnalysisContent content = result.Contents!.First();
-        return content.Markdown ?? string.Empty;
+        return result.ToLlmInput(
+            metadata: new Dictionary<string, object>
+            {
+                ["source"] = url,
+                ["tokensConsumed"] = usage?.Tokens is { Count: > 0 } tokens
+                    ? (object)tokens
+                    : "unavailable",
+            });
     }
 }
