@@ -7,7 +7,8 @@
 #:project ../expenses-agent/expenses-agent.csproj
 #:project ../content-understanding-mcpserver/content-understanding-mcpserver.csproj
 
-using Projects;
+using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Azure.CosmosDB;
 using Aspire.Hosting.Foundry;
 
@@ -31,12 +32,12 @@ var db = cosmos.AddCosmosDatabase("db");
 var sessions = db.AddContainer("sessions","/sessionsId");
 var conversations = db.AddContainer("conversations","/conversationsId");
 
-var mcpserver = builder.AddProject<Projects.content_understanding_mcpserver>("mcpserver")
+var mcpserver = builder.AddProject("mcpserver", "../content-understanding-mcpserver/content-understanding-mcpserver.csproj")
     .WithHttpEndpoint()
     .WithReference(foundry).WaitFor(foundry);
 
 
-var expensesAgent = builder.AddProject<Projects.expenses_agent>("expenses-agent")
+var expensesAgent = builder.AddProject("expenses-agent", "../expenses-agent/expenses-agent.csproj")
     .WithReference(foundry).WaitFor(foundry)
     .WithReference(conversations).WaitFor(conversations)
     .WithReference(mcpserver).WaitFor(mcpserver)
