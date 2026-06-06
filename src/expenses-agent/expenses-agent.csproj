@@ -10,7 +10,9 @@
   <ItemGroup>
     <PackageReference Include="Aspire.Azure.AI.OpenAI" Version="13.4.2-preview.1.26303.6" />
     <PackageReference Include="Aspire.Azure.AI.Inference" Version="13.4.2-preview.1.26303.6" />
+    <PackageReference Include="Aspire.Azure.Storage.Blobs" Version="13.4.2" />
     <PackageReference Include="Aspire.Microsoft.Azure.Cosmos" Version="13.4.2" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.28.0" />
     <PackageReference Include="Microsoft.Agents.AI" Version="1.7.0" />
     <PackageReference Include="Microsoft.Agents.AI.Hosting" Version="1.7.0-preview.260526.1" />
     <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.7.0" />
