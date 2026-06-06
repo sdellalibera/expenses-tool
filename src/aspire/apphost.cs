@@ -29,7 +29,7 @@ var cosmos = builder.AddAzureCosmosDB("cosmos-db")
         });
 
 var db = cosmos.AddCosmosDatabase("db");
-var sessions = db.AddContainer("sessions","/sessionsId");
+var sessions = db.AddContainer("sessions","/id");
 var conversations = db.AddContainer("conversations","/conversationsId");
 
 var mcpserver = builder.AddProject("mcpserver", "../content-understanding-mcpserver/content-understanding-mcpserver.csproj")
@@ -39,7 +39,7 @@ var mcpserver = builder.AddProject("mcpserver", "../content-understanding-mcpser
 
 var expensesAgent = builder.AddProject("expenses-agent", "../expenses-agent/expenses-agent.csproj")
     .WithReference(foundry).WaitFor(foundry)
-    .WithReference(conversations).WaitFor(conversations)
+    .WithReference(sessions).WaitFor(sessions)
     .WithReference(mcpserver).WaitFor(mcpserver)
     .WithEnvironment("MCPSERVER_HTTP", mcpserver.GetEndpoint("http"));
 

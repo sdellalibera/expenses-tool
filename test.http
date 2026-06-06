@@ -2,5 +2,5 @@ POST http://localhost:5006/chat
 Content-Type: application/json
 
 {
-    "Message":"Can you please analyze this document? https://github.com/Azure-Samples/azure-ai-content-understanding-python/raw/refs/heads/main/data/invoice.pdf"
+    "Message":"che tool hai a disposizione?"
 }

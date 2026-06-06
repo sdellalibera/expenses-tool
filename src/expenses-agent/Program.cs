@@ -6,6 +6,7 @@ using Microsoft.Agents.AI.Hosting;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Client;
+using SharedServices;
 
 const string AgentName = "expenses-agent";
 
@@ -17,6 +18,17 @@ var agentInstructions = await File.ReadAllTextAsync(promptPath);
 builder.AddServiceDefaults();
 
 builder.Services.AddOpenApi();
+
+// Register the Cosmos "sessions" container (provisioned by the AppHost) using a
+// System.Text.Json serializer, then expose it as an agent session store so each
+// conversation thread is created on first use and its messages persisted per turn.
+builder.AddKeyedAzureCosmosContainer("sessions",
+    configureClientOptions: options =>
+    {
+        options.Serializer = new CosmosSystemTextJsonSerializer();
+    });
+
+builder.Services.AddCosmosAgentSessionStore("sessions");
 
 builder.AddAzureChatCompletionsClient(connectionName: "foundry",
     configureSettings: settings =>
@@ -74,15 +86,31 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.MapPost("/chat", async (AgentChatRequest request, [FromKeyedServices(AgentName)] AIAgent agent, CancellationToken cancellationToken) =>
+app.MapPost("/chat", async (
+    AgentChatRequest request,
+    [FromKeyedServices(AgentName)] AIAgent agent,
+    CosmosAgentSessionStore sessionStore,
+    CancellationToken cancellationToken) =>
 {
     if (string.IsNullOrWhiteSpace(request.Message))
     {
         return Results.BadRequest(new { error = "Message is required." });
     }
 
-    var response = await agent.RunAsync(request.Message, cancellationToken: cancellationToken);
-    return Results.Ok(new AgentChatResponse(response.Text));
+    // A missing conversation id starts a new thread; otherwise the existing
+    // thread is loaded from Cosmos so the agent has the full conversation history.
+    var conversationId = string.IsNullOrWhiteSpace(request.ConversationId)
+        ? Guid.NewGuid().ToString("N")
+        : request.ConversationId.Trim();
+
+    var session = await sessionStore.GetSessionAsync(agent, conversationId, cancellationToken);
+
+    var agentResponse = await agent.RunAsync(request.Message, session, cancellationToken: cancellationToken);
+
+    // Persist the updated thread (including the new user and assistant messages).
+    await sessionStore.SaveSessionAsync(agent, conversationId, session, cancellationToken);
+
+    return Results.Ok(new AgentChatResponse(agentResponse.Text, conversationId));
 })
 .WithName("Chat")
 .WithDescription("Sends a message to the expenses agent and returns its reply.");
