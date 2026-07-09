@@ -1,10 +1,10 @@
-﻿#:package Aspire.Hosting.AppHost@13.4.2
-#:package Aspire.Hosting.Azure.CosmosDB@13.4.2
-#:package Aspire.Hosting.Azure.Storage@13.4.2
-#:package Aspire.Hosting.Foundry@13.4.2-preview.1.26303.6
-#:package Aspire.Hosting.JavaScript@13.4.2
+#:package Aspire.Hosting.AppHost@13.4.2
+#:package Aspire.Hosting.Azure.CosmosDB@13.4.6
+#:package Aspire.Hosting.Azure.Storage@13.4.6
+#:package Aspire.Hosting.Foundry@13.4.6-preview.1.26319.6
+#:package Aspire.Hosting.JavaScript@13.4.6
 
-#:sdk Aspire.AppHost.Sdk@13.4.2
+#:sdk Aspire.AppHost.Sdk@13.4.6
 
 #:project ../expenses-agent/expenses-agent.csproj
 #:project ../content-understanding-mcpserver/content-understanding-mcpserver.csproj
