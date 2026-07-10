@@ -1,7 +1,5 @@
 <Solution>
-  <Project Path="src/expenses-agent/expenses-agent.csproj" />
   <Project Path="src/servicedefaults/servicedefaults.csproj" />
-  <Project Path="src/content-understanding-mcpserver/content-understanding-mcpserver.csproj" />
   <Project Path="src/storage-mcpserver/storage-mcpserver.csproj" />
   <Project Path="src/shared-services/shared-services.csproj" />
 </Solution>

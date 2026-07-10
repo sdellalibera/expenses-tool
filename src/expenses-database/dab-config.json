@@ -1,0 +1,225 @@
+{
+  "$schema": "https://github.com/Azure/data-api-builder/releases/download/v2.0.8/dab.draft.schema.json",
+  "data-source": {
+    "database-type": "mssql",
+    "connection-string": "@env('MSSQL_CONNECTION_STRING')",
+    "options": {
+      "set-session-context": false
+    }
+  },
+  "runtime": {
+    "rest": {
+      "enabled": true,
+      "path": "/api",
+      "request-body-strict": false
+    },
+    "graphql": {
+      "enabled": true,
+      "path": "/graphql",
+      "allow-introspection": true
+    },
+    "mcp": {
+      "enabled": true,
+      "path": "/mcp"
+    },
+    "host": {
+      "cors": {
+        "origins": [],
+        "allow-credentials": false
+      },
+      "authentication": {
+        "provider": "AzureAD",
+        "jwt": {
+          "audience": "@env('AZURE_AD_AUDIENCE')",
+          "issuer": "@env('AZURE_AD_ISSUER')"
+        }
+      },
+      "mode": "development"
+    },
+    "telemetry": {
+      "open-telemetry": {
+        "enabled": true,
+        "endpoint": "@env('OTEL_EXPORTER_OTLP_ENDPOINT')",
+        "headers": "@env('OTEL_EXPORTER_OTLP_HEADERS')",
+        "service-name": "@env('OTEL_SERVICE_NAME')"
+      }
+    }
+  },
+  "autoentities": {},
+  "entities": {
+    "ExpenseReport": {
+      "description": "An expense report that groups the expenses submitted by a user.",
+      "source": {
+        "object": "dbo.ExpenseReport",
+        "type": "table"
+      },
+      "fields": [
+        {
+          "name": "ReportId",
+          "description": "Report identifier (auto-generated).",
+          "primary-key": true
+        },
+        {
+          "name": "UserId",
+          "description": "Id of the user who owns the report.",
+          "primary-key": false
+        },
+        {
+          "name": "Title",
+          "description": "Human-readable report title.",
+          "primary-key": false
+        },
+        {
+          "name": "Status",
+          "description": "Workflow status, e.g. Draft, Submitted, Approved, Rejected.",
+          "primary-key": false
+        },
+        {
+          "name": "SubmittedAt",
+          "description": "UTC timestamp when the report was submitted (null while Draft).",
+          "primary-key": false
+        },
+        {
+          "name": "CreatedAt",
+          "description": "UTC timestamp when the report was created.",
+          "primary-key": false
+        }
+      ],
+      "graphql": {
+        "enabled": true,
+        "type": {
+          "singular": "ExpenseReport",
+          "plural": "ExpenseReports"
+        }
+      },
+      "rest": {
+        "enabled": true
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [
+            {
+              "action": "*"
+            }
+          ]
+        },
+        {
+          "role": "authenticated",
+          "actions": [
+            {
+              "action": "*"
+            }
+          ]
+        }
+      ]
+    },
+    "Expense": {
+      "description": "A single expense line item extracted from a receipt or invoice image. The receipt image is stored in blob storage and referenced by ReceiptBlobKey.",
+      "source": {
+        "object": "dbo.Expense",
+        "type": "table"
+      },
+      "fields": [
+        {
+          "name": "ExpenseId",
+          "description": "Expense identifier (auto-generated).",
+          "primary-key": true
+        },
+        {
+          "name": "ReportId",
+          "description": "Id of the parent ExpenseReport.",
+          "primary-key": false
+        },
+        {
+          "name": "UserId",
+          "description": "Id of the user who incurred the expense.",
+          "primary-key": false
+        },
+        {
+          "name": "Vendor",
+          "description": "Merchant or vendor name from the receipt.",
+          "primary-key": false
+        },
+        {
+          "name": "Amount",
+          "description": "Total amount of the expense.",
+          "primary-key": false
+        },
+        {
+          "name": "Currency",
+          "description": "ISO 4217 currency code, e.g. EUR, USD.",
+          "primary-key": false
+        },
+        {
+          "name": "ExpenseDate",
+          "description": "Date printed on the receipt.",
+          "primary-key": false
+        },
+        {
+          "name": "Category",
+          "description": "Expense category, e.g. Meals, Travel, Lodging.",
+          "primary-key": false
+        },
+        {
+          "name": "Description",
+          "description": "Free-text description or notes.",
+          "primary-key": false
+        },
+        {
+          "name": "ReceiptBlobKey",
+          "description": "Stable blob key of the receipt image in blob storage (not a URL).",
+          "primary-key": false
+        },
+        {
+          "name": "ReceiptSha256",
+          "description": "SHA-256 hash of the receipt image for integrity/dedup.",
+          "primary-key": false
+        },
+        {
+          "name": "ReceiptBytes",
+          "description": "Size of the receipt image in bytes.",
+          "primary-key": false
+        },
+        {
+          "name": "ReceiptMime",
+          "description": "MIME type of the receipt image, e.g. image/jpeg.",
+          "primary-key": false
+        },
+        {
+          "name": "CreatedAt",
+          "description": "UTC timestamp when the expense record was created.",
+          "primary-key": false
+        }
+      ],
+      "graphql": {
+        "enabled": true,
+        "type": {
+          "singular": "Expense",
+          "plural": "Expenses"
+        }
+      },
+      "rest": {
+        "enabled": true
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [
+            {
+              "action": "*"
+            }
+          ]
+        },
+        {
+          "role": "authenticated",
+          "actions": [
+            {
+              "action": "*"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
