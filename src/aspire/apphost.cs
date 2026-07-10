@@ -90,8 +90,6 @@ var sqlMcpServer = builder.AddContainer("sql-mcp-server", "azure-databases/data-
     .WithImageRegistry("mcr.microsoft.com")
     .WithHttpEndpoint(targetPort: 5000, name: "http")
     .WithEnvironment("MSSQL_CONNECTION_STRING", expensesDatabase)
-    .WithEnvironment("AZURE_AD_AUDIENCE", builder.Configuration["AZURE_AD_AUDIENCE"] ?? "")
-    .WithEnvironment("AZURE_AD_ISSUER", builder.Configuration["AZURE_AD_ISSUER"] ?? "")
     .WithBindMount("../expenses-database/dab-config.json", "/App/dab-config.json", isReadOnly: true)
     .WaitFor(expensesDatabase);
 
@@ -101,9 +99,7 @@ var sqlMcpServer = builder.AddContainer("sql-mcp-server", "azure-databases/data-
 var storageMcpServer = builder.AddProject("storagemcp", "../storage-mcpserver/storage-mcpserver.csproj")
     .WithHttpEndpoint()
     .WithExternalHttpEndpoints()
-    .WithReference(expensesImages).WaitFor(expensesImages)
-    .WithEnvironment("AzureAd__TenantId", builder.Configuration["AZURE_AD_TENANT_ID"] ?? "")
-    .WithEnvironment("AzureAd__Audience", builder.Configuration["AZURE_AD_AUDIENCE"] ?? "");
+    .WithReference(expensesImages).WaitFor(expensesImages);
 
 // Expenses agent (Python, Microsoft Agent Framework) hosted as an ASGI app.
 // It uses Content Understanding plus the SQL and Storage MCP servers as tools.
@@ -118,11 +114,7 @@ var expensesAgent = builder.AddUvicornApp("expenses-agent", "../expenses-agent",
     .WithReference(expensesImages).WaitFor(expensesImages)
     .WithReference(sqlMcpServer.GetEndpoint("http")).WaitFor(sqlMcpServer)
     .WithReference(storageMcpServer).WaitFor(storageMcpServer)
-    .WithEnvironment("FOUNDRY_MODEL", builder.Configuration["FOUNDRY_MODEL"] ?? "gpt-5")
-    .WithEnvironment("SQL_MCP_SCOPE", builder.Configuration["SQL_MCP_SCOPE"] ?? "")
-    .WithEnvironment("STORAGE_MCP_SCOPE", builder.Configuration["STORAGE_MCP_SCOPE"] ?? "")
-    .WithEnvironment("AZURE_CONTENTUNDERSTANDING_ENDPOINT", builder.Configuration["AZURE_CONTENTUNDERSTANDING_ENDPOINT"] ?? "")
-    .WithEnvironment("FOUNDRY_PROJECT_ENDPOINT", builder.Configuration["FOUNDRY_PROJECT_ENDPOINT"] ?? "");
+    .AsHostedAgent(project);
 
 // React frontend (Vite) used to capture photos from a phone camera. The Vite
 // dev server is launched via npm and Aspire automatically forwards the chosen
