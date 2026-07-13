@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/src/">
+    <Project Path="src/expenses-agent/expenses-agent.csproj" />
+  </Folder>
   <Project Path="src/servicedefaults/servicedefaults.csproj" />
   <Project Path="src/storage-mcpserver/storage-mcpserver.csproj" />
   <Project Path="src/shared-services/shared-services.csproj" />

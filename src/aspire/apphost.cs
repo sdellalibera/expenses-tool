@@ -5,11 +5,11 @@
 #:package Aspire.Hosting.Azure.Sql@13.4.6
 #:package Aspire.Hosting.Foundry@13.4.6-preview.1.26319.6
 #:package Aspire.Hosting.JavaScript@13.4.6
-#:package Aspire.Hosting.Python@13.4.6
 
 #:sdk Aspire.AppHost.Sdk@13.4.6
 
 #:project ../storage-mcpserver/storage-mcpserver.csproj
+#:project ../expenses-agent/expenses-agent.csproj
 
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
@@ -36,14 +36,14 @@ var cosmos = builder.AddAzureCosmosDB("cosmos-db")
         });
 
 var db = cosmos.AddCosmosDatabase("db");
-// NOTE: Cosmos is retained for future session storage but is currently unused by
-// the Python agent (which manages sessions in-memory / via Foundry threads).
-db.AddContainer("sessions", "/id");
+// The C# agent persists each conversation thread in the "sessions" container so
+// history survives across requests and restarts.
+var sessions = db.AddContainer("sessions", "/id");
 db.AddContainer("conversations", "/conversationsId");
 
 // Azure Storage account for captured receipt images. Runs against the Azurite
 // emulator locally (BlobPort 27000) and against a real Storage account when deployed.
-var storage = builder.AddAzureStorage("expenses-storage")
+var storage = builder.AddAzureStorage("expenses-blob-storage")
     .RunAsEmulator(emulator =>
     {
         emulator.WithBlobPort(27000);
@@ -67,15 +67,15 @@ IResourceBuilder<IResourceWithConnectionString> expensesDatabase;
 
 if (builder.ExecutionContext.IsPublishMode)
 {
-    expensesDatabase = builder.AddAzureSqlServer("expenses-sql")
-        .AddDatabase("expenses-database", "expensesdb");
+    expensesDatabase = builder.AddAzureSqlServer("expenses-sql-server")
+        .AddDatabase("expenses-sql-database", "expensesdb");
 }
 else
 {
-    expensesDatabase = builder.AddSqlServer("expenses-sql")
+    expensesDatabase = builder.AddSqlServer("expenses-sql-database")
         .WithDataVolume()
         .WithLifetime(ContainerLifetime.Persistent)
-        .AddDatabase("expenses-database", "expensesdb")
+        .AddDatabase("expenses-sql-database", "expensesdb")
         .WithCreationScript(expensesSchema);
 }
 
@@ -83,9 +83,6 @@ else
 // in ../expenses-database/dab-config.json as MCP tools (plus REST at /api and
 // GraphQL at /graphql, MCP at /mcp). Runs locally as a container and deploys to
 // Azure Container Apps.
-//
-// The DAB config uses the AzureAD auth provider; the audience/issuer come from the
-// AZURE_AD_AUDIENCE / AZURE_AD_ISSUER environment variables.
 var sqlMcpServer = builder.AddContainer("sql-mcp-server", "azure-databases/data-api-builder", "2.0.8")
     .WithImageRegistry("mcr.microsoft.com")
     .WithHttpEndpoint(targetPort: 5000, name: "http")
@@ -96,24 +93,24 @@ var sqlMcpServer = builder.AddContainer("sql-mcp-server", "azure-databases/data-
 // The Storage MCP server is exposed with external HTTP endpoints so that a
 // Foundry-hosted agent can reach its /mcp endpoint. It validates Entra bearer
 // tokens using the AZURE_AD_TENANT_ID / AZURE_AD_AUDIENCE environment variables.
-var storageMcpServer = builder.AddProject("storagemcp", "../storage-mcpserver/storage-mcpserver.csproj")
+var blobStorageMcpServer = builder.AddProject("blob-storage-mcp-server", "../storage-mcpserver/storage-mcpserver.csproj")
     .WithHttpEndpoint()
     .WithExternalHttpEndpoints()
     .WithReference(expensesImages).WaitFor(expensesImages);
 
-// Expenses agent (Python, Microsoft Agent Framework) hosted as an ASGI app.
-// It uses Content Understanding plus the SQL and Storage MCP servers as tools.
-// The MCP server URLs arrive via service discovery (WithReference); the Entra
-// scopes, Foundry and Content Understanding endpoints come from environment
-// variables.
-var expensesAgent = builder.AddUvicornApp("expenses-agent", "../expenses-agent", "expenses_agent.app:app")
-    .WithHttpEndpoint(env: "PORT")
+// Expenses agent (C#, Microsoft Agent Framework) hosted as an ASP.NET app.
+// It analyzes receipt images with Azure AI Content Understanding (via the SDK)
+// and uses the Storage MCP server as a tool. The MCP server URL arrives via
+// service discovery (WithReference / STORAGEMCP_HTTP); the Foundry connection and
+// Content Understanding endpoint come from configuration.
+var expensesAgent = builder.AddProject("expenses-agent", "../expenses-agent/expenses-agent.csproj")
     .WithExternalHttpEndpoints()
     .WithReference(foundry).WaitFor(foundry)
     .WithReference(project)
+    .WithReference(sessions).WaitFor(sessions)
     .WithReference(expensesImages).WaitFor(expensesImages)
-    .WithReference(sqlMcpServer.GetEndpoint("http")).WaitFor(sqlMcpServer)
-    .WithReference(storageMcpServer).WaitFor(storageMcpServer)
+    .WithReference(blobStorageMcpServer).WaitFor(blobStorageMcpServer)
+    .WithReference(sqlMcpServer)
     .AsHostedAgent(project);
 
 // React frontend (Vite) used to capture photos from a phone camera. The Vite
