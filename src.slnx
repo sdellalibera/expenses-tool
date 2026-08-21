@@ -1,5 +1,3 @@
 <Solution>
-  <Folder Name="/src/" />
   <Project Path="src/servicedefaults/servicedefaults.csproj" />
-  <Project Path="src/shared-services/shared-services.csproj" />
 </Solution>
