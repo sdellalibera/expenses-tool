@@ -1,6 +1,0 @@
-POST http://localhost:5006/chat
-Content-Type: application/json
-
-{
-    "Message":"che tool hai a disposizione?"
-}
