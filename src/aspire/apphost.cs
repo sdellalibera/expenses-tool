@@ -1,12 +1,15 @@
-﻿#:package Aspire.Hosting.Azure.CosmosDB@13.3.5
-#:package Aspire.Hosting.Foundry@13.3.0-preview.1.26256.5
+//Packages
+#:package Aspire.Hosting.AppHost@13.4.2
+#:package Aspire.Hosting.Azure.CosmosDB@13.4.6
+#:package Aspire.Hosting.Foundry@13.4.6-preview.1.26319.6
+#:package Aspire.Hosting.JavaScript@13.4.6
+#:package Aspire.Hosting.Python@*
 
-#:sdk Aspire.AppHost.Sdk@13.3.0
+//Sdks
+#:sdk Aspire.AppHost.Sdk@13.4.6
 
-#:project ../extraction-agent/extraction-agent.csproj
-#:project ../extraction-mcpserver/extraction-mcpserver.csproj
-
-using Projects;
+using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Azure.CosmosDB;
 using Aspire.Hosting.Foundry;
 
@@ -14,7 +17,6 @@ var builder = DistributedApplication.CreateBuilder(args);
 
 var existingFoundryName = builder.AddParameter("existingFoundryName");
 var existingFoundryResourceGroup = builder.AddParameter("existingFoundryResourceGroup");
-var foundry = builder.AddFoundry("foundry").RunAsExisting(existingFoundryName,existingFoundryResourceGroup);
 
 //subject to removal or change in future, requires pragma
 #pragma warning disable ASPIRECOSMOSDB001
@@ -27,16 +29,34 @@ var cosmos = builder.AddAzureCosmosDB("cosmos-db")
         });
 
 var db = cosmos.AddCosmosDatabase("db");
-var sessions = db.AddContainer("sessions","/sessionsId");
-var conversations = db.AddContainer("conversations","/conversationsId");
+// The C# agent persists each conversation thread in the "sessions" container so
+// history survives across requests and restarts.
+var sessions = db.AddContainer("sessions", "/id");
+var conversations = db.AddContainer("conversations", "/conversationsId");
+var records = db.AddContainer("records","/records");
 
-var mcpserver = builder.AddProject<Projects.extraction_mcpserver>("mcpserver")
-    .WithHttpEndpoint()
-    .WithReference(foundry).WaitFor(foundry);
+// Expenses agent (Python, FastAPI + uvicorn). Receives invoice images from the
+// frontend and runs Azure AI Content Understanding with the prebuilt-invoice
+// analyzer. Renders the result via `to_llm_input` and returns the YAML payload
+// that the downstream agent will consume via A2A (not wired up yet).
+var expensesAgent = builder.AddPythonApp(
+        name: "expenses-agent",
+        appDirectory: "../expenses-agent-python",
+        scriptPath: "agent.py")
+    .WithHttpEndpoint(port: 8000, env: "PORT")
+    .WithExternalHttpEndpoints()
+    .WithEnvironment("AZURE_CONTENTUNDERSTANDING_ENDPOINT",
+        builder.Configuration["AZURE_CONTENTUNDERSTANDING_ENDPOINT"]);
 
-var extraction_agent = builder.AddProject<Projects.extraction_agent>("extraction-agent")
-    .WithReference(foundry).WaitFor(foundry)
-    .WithReference(conversations).WaitFor(conversations)
-    .WithReference(mcpserver).WaitFor(mcpserver);
+// React frontend (Vite) used to capture photos from a phone camera. The Vite
+// dev server is launched via npm and Aspire automatically forwards the chosen
+// HTTP endpoint to Vite so it's reachable from a mobile device on the same network.
+
+/*
+builder.AddViteApp("frontend", "../frontend")
+    .WithNpm()
+    .WithReference(expensesAgent).WaitFor(expensesAgent)
+    .WithExternalHttpEndpoints();
+*/
 
 builder.Build().Run();

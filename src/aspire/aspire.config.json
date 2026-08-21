@@ -1,7 +1,4 @@
 {
-  "appHost": {
-    "path": "apphost.cs"
-  },
   "profiles": {
     "https": {
       "applicationUrl": "https://localhost:17236;http://localhost:15176",
@@ -22,5 +19,8 @@
         "ASPIRE_ALLOW_UNSECURED_TRANSPORT": "true"
       }
     }
+  },
+  "appHost": {
+    "path": "apphost.cs"
   }
 }
