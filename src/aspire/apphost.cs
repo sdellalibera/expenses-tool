@@ -1,62 +1,62 @@
 //Packages
-#:package Aspire.Hosting.AppHost@13.4.2
-#:package Aspire.Hosting.Azure.CosmosDB@13.4.6
-#:package Aspire.Hosting.Foundry@13.4.6-preview.1.26319.6
-#:package Aspire.Hosting.JavaScript@13.4.6
-#:package Aspire.Hosting.Python@*
+#:package Aspire.Hosting.AppHost@13.5.2
+#:package Aspire.Hosting.Azure.CosmosDB@13.5.2
+#:package Aspire.Hosting.DevTunnels@13.5.2
+#:package Aspire.Hosting.Foundry@13.5.2-preview.1.26421.6
+#:package Aspire.Hosting.JavaScript@13.5.2
+#:package Aspire.Hosting.Python@13.5.2
 
 //Sdks
-#:sdk Aspire.AppHost.Sdk@13.4.6
+#:sdk Aspire.AppHost.Sdk@13.5.2
+
+// The file-based AppHost intentionally does not use the Aspire CLI bundle.
+#:property NoWarn=ASPIRE010
 
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
-using Aspire.Hosting.Azure.CosmosDB;
 using Aspire.Hosting.Foundry;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-var existingFoundryName = builder.AddParameter("existingFoundryName");
-var existingFoundryResourceGroup = builder.AddParameter("existingFoundryResourceGroup");
+var foundry = builder.AddFoundry("foundry");
+var project = foundry.AddProject("expenses");
 
-//subject to removal or change in future, requires pragma
+var deployment = project.AddModelDeployment("gpt5", FoundryModel.OpenAI.Gpt5);
+// Required by Content Understanding default models.
+var deploymentMini = project.AddModelDeployment("gpt5mini", FoundryModel.OpenAI.Gpt5Mini);
+var embeddingDeployment = project.AddModelDeployment("TextEmbedding3Large", FoundryModel.OpenAI.TextEmbedding3Large);
+
+var contentUnderstandingEndpoint = builder.AddParameter("contentUnderstandingEndpoint");
+
 #pragma warning disable ASPIRECOSMOSDB001
 var cosmos = builder.AddAzureCosmosDB("cosmos-db")
-    .RunAsPreviewEmulator(
-        emulator =>
-        {
-            emulator.WithDataExplorer();
-            emulator.WithLifetime(ContainerLifetime.Persistent);
-        });
+    .RunAsPreviewEmulator(emulator =>
+    {
+        emulator.WithDataExplorer();
+        emulator.WithLifetime(ContainerLifetime.Persistent);
+    });
 
 var db = cosmos.AddCosmosDatabase("db");
-// The C# agent persists each conversation thread in the "sessions" container so
-// history survives across requests and restarts.
-var sessions = db.AddContainer("sessions", "/id");
-var conversations = db.AddContainer("conversations", "/conversationsId");
-var records = db.AddContainer("records","/records");
+var records = db.AddContainer("records", "/userId");
 
-// Expenses agent (Python, FastAPI + uvicorn). Receives invoice images from the
-// frontend and runs Azure AI Content Understanding with the prebuilt-invoice
-// analyzer. Renders the result via `to_llm_input` and returns the YAML payload
-// that the downstream agent will consume via A2A (not wired up yet).
 var expensesAgent = builder.AddPythonApp(
         name: "expenses-agent",
         appDirectory: "../expenses-agent-python",
-        scriptPath: "agent.py")
+        scriptPath: "expenses_agent_python/main.py")
+    .WithEnvironment("contentUnderstandingEndpoint", contentUnderstandingEndpoint)
+    .WithReference(deployment).WaitFor(deployment)
+    .WithReference(cosmos).WaitFor(cosmos)
+    .WithEnvironment("COSMOS_DATABASE", "db")
+    .WithEnvironment("COSMOS_RECORDS_CONTAINER", "records")
     .WithHttpEndpoint(port: 8000, env: "PORT")
     .WithExternalHttpEndpoints()
-    .WithEnvironment("AZURE_CONTENTUNDERSTANDING_ENDPOINT",
-        builder.Configuration["AZURE_CONTENTUNDERSTANDING_ENDPOINT"]);
+    .AsHostedAgent(project);
 
-// React frontend (Vite) used to capture photos from a phone camera. The Vite
-// dev server is launched via npm and Aspire automatically forwards the chosen
-// HTTP endpoint to Vite so it's reachable from a mobile device on the same network.
-
-/*
-builder.AddViteApp("frontend", "../frontend")
+var frontend = builder.AddViteApp("frontend", "../frontend")
     .WithNpm()
     .WithReference(expensesAgent).WaitFor(expensesAgent)
     .WithExternalHttpEndpoints();
-*/
+
+
 
 builder.Build().Run();

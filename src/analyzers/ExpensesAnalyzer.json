@@ -1,0 +1,90 @@
+{
+	"analyzerId": "ExpensesAnalyzer",
+	"description": "This analyzer should be used for expenses in the expenses demo",
+	"createdAt": "2026-08-26T08:51:48Z",
+	"lastModifiedAt": "2026-08-26T08:51:48Z",
+	"baseAnalyzerId": "prebuilt-document",
+	"config": {
+		"returnDetails": false,
+		"enableOcr": true,
+		"enableLayout": true,
+		"enableFormula": true,
+		"enableFigureDescription": false,
+		"enableFigureAnalysis": false,
+		"chartFormat": "chartjs",
+		"workflow": "standard.2026-06-01-preview",
+		"tableFormat": "html",
+		"enableSegment": false,
+		"omitContent": false,
+		"segmentPerPage": false,
+		"allowInPageSegments": false,
+		"annotationFormat": "markdown"
+	},
+	"warnings": [],
+	"status": "ready",
+	"processingLocation": "geography",
+	"supportedModels": {
+		"completion": [
+			"gpt-4o",
+			"gpt-4o-mini",
+			"gpt-4.1",
+			"gpt-4.1-mini",
+			"gpt-4.1-nano",
+			"gpt-5",
+			"gpt-5-mini",
+			"gpt-5-nano",
+			"gpt-5.1",
+			"gpt-5.2",
+			"gpt-5.4",
+			"gpt-5.4-mini",
+			"gpt-5.5"
+		]
+	},
+	"models": {
+		"completion": "gpt-5.4",
+		"embedding": "text-embedding-3-large"
+	},
+	"fieldSchema": {
+		"fields": {
+			"TotalAmount": {
+				"type": "number",
+				"method": "extract",
+				"description": "Total amount payed"
+			},
+			"LineItems": {
+				"type": "array",
+				"method": "generate",
+				"description": "All line items in the receipt",
+				"items": {
+					"type": "object",
+					"properties": {
+						"Title": {
+							"type": "string",
+							"method": "extract",
+							"description": "name of specific line item",
+							"estimateSourceAndConfidence": true
+						},
+						"Price": {
+							"type": "number",
+							"method": "extract",
+							"description": "price of specific line item",
+							"estimateSourceAndConfidence": true
+						}
+					}
+				}
+			},
+			"Name": {
+				"type": "string",
+				"method": "extract",
+				"description": "Name of the business or hotel",
+				"estimateSourceAndConfidence": true
+			},
+			"Category": {
+				"type": "string",
+				"method": "extract",
+				"description": "Category of expense (food, ground transport, hotel, etc)",
+				"estimateSourceAndConfidence": true
+			}
+		}
+	}
+}

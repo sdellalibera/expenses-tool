@@ -147,14 +147,15 @@ aspire secret set STORAGE_MCP_SCOPE  "<app-client-id>/.default"
 
 ## 5. Python agent virtual environment
 
-The Python `expenses-agent` runs via Aspire's `AddUvicornApp`, which uses the
-project's `.venv`. Create it once:
+The Python `expenses-agent` runs via Aspire's `AddPythonApp`, which uses the
+`.venv` in the agent directory. Create it once:
 
 ```bash
-cd src/expenses-agent
+cd src/expenses-agent-python
 python -m venv .venv
 . .venv/Scripts/Activate.ps1          # Windows PowerShell (use .venv/bin/activate on macOS/Linux)
-pip install --pre -e .                 # --pre: the Content Understanding package is pre-release
+python -m pip install --upgrade pip
+python -m pip install --pre -r requirements.txt # --pre: Content Understanding packages are pre-release
 ```
 
 The agent authenticates with `DefaultAzureCredential`, so `az login` (step 2) is

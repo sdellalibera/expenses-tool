@@ -12,6 +12,7 @@
 *.env
 *.lscache
 appsettings.Development.json
+.venv/
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
@@ -302,6 +303,8 @@ FakesAssemblies/
 # Node.js Tools for Visual Studio
 .ntvs_analysis.dat
 node_modules/
+dist/
+.vite/
 
 # Visual Studio 6 build log
 *.plg
@@ -421,3 +424,6 @@ FodyWeavers.xsd
 
 # Azure Developer CLI
 .azure/
+
+
+
