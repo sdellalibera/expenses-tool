@@ -1,32 +1,43 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// The agent API URL is injected by the Aspire AppHost via the
-// `services__expenses-agent__http__0` environment variable, which Vite exposes
-// to the browser through `import.meta.env.VITE_AGENT_API_URL`. See main.tsx.
-export default defineConfig(({ mode }) => {
+/**
+ * The AppHost injects the agent URL through Aspire service discovery
+ * (`services__expenses-agent__http__0`).
+ *
+ * The dev server *proxies* `/chat`, `/api` and `/health` to that URL instead of
+ * letting the browser call it directly. Keeping the API same-origin means the
+ * app also works when you open it from your phone on the LAN — no CORS, no
+ * mixed content, no hard-coded localhost.
+ */
+function agentUrl(): string {
+  return (
+    process.env["services__expenses-agent__http__0"] ??
+    process.env["services__expenses-agent__https__0"] ??
+    process.env.VITE_AGENT_API_URL ??
+    "http://localhost:8000"
+  );
+}
+
+export default defineConfig(() => {
+  const target = agentUrl();
   const port = Number(process.env.PORT ?? 5173);
 
-  // Promote Aspire-injected service discovery env vars into VITE_-prefixed ones
-  // so they are available in the browser bundle.
-  const agentUrl =
-    process.env["services__expenses-agent__https__0"] ??
-    process.env["services__expenses-agent__http__0"] ??
-    process.env.VITE_AGENT_API_URL ??
-    "";
-
-  process.env.VITE_AGENT_API_URL = agentUrl;
+  const proxy = {
+    "/chat": { target, changeOrigin: true, secure: false },
+    "/api": { target, changeOrigin: true, secure: false },
+    "/health": { target, changeOrigin: true, secure: false },
+  };
 
   return {
     plugins: [react()],
-    server: {
-      host: "0.0.0.0",
-      port,
-      strictPort: true,
-    },
-    preview: {
-      host: "0.0.0.0",
-      port,
+    server: { host: "0.0.0.0", port, strictPort: true, proxy },
+    preview: { host: "0.0.0.0", port, proxy },
+    test: {
+      environment: "jsdom",
+      globals: true,
+      setupFiles: ["./src/test/setup.ts"],
+      css: false,
     },
   };
 });
