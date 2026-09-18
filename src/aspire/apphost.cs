@@ -87,6 +87,7 @@ var expensesAgent = builder.AddPythonApp(
     // Cosmos containers directly; trips and expenses still go through the MCP server.
     .WithReference(cosmos).WaitFor(cosmos)
     .WithEnvironment("COSMOS_DATABASE", DatabaseName)
+    .WithEnvironment("ENABLE_COSMOS_MEMORY", builder.ExecutionContext.IsRunMode ? "false" : "true")
     .WithEnvironment("MEMORY_CHAT_MODEL", "gpt5mini")
     .WithEnvironment("MEMORY_EMBEDDING_MODEL", "TextEmbedding3Large")
     .WithEnvironment("contentUnderstandingEndpoint", contentUnderstandingEndpoint)
@@ -99,7 +100,12 @@ var expensesAgent = builder.AddPythonApp(
     .WithHttpEndpoint(env: "PORT")
     .WithHttpHealthCheck("/health")
     .WithExternalHttpEndpoints()
-    .AsHostedAgent(foundryProject);
+    .WithOtlpExporter(OtlpProtocol.HttpProtobuf);
+
+if (builder.ExecutionContext.IsPublishMode)
+{
+    expensesAgent.AsHostedAgent(foundryProject);
+}
 
 // ---------------------------------------------------------------------------
 // React frontend. The Vite dev server proxies /chat, /api and /health to the

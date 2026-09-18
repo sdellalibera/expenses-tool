@@ -66,7 +66,7 @@ class CosmosMemory:
         except Exception as exc:  # pragma: no cover - depends on live Azure/emulator
             self.error = f"Cosmos durable memory unavailable: {exc}"
             logger.warning(self.error, exc_info=True)
-            self.provider = None
+            await self.stop()
             return None
 
         logger.info(

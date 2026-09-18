@@ -85,6 +85,13 @@ py -3.13 -m venv .venv                 # use an x64 interpreter on ARM devices
 pre-release. The agent authenticates with `DefaultAzureCredential`, so `az login`
 is enough locally.
 
+Local Aspire runs disable cross-conversation durable memory because the preview
+Cosmos emulator rejects the memory toolkit's vector/full-text indexing policy.
+Trips, expenses, and conversation transcripts still persist through the MCP server.
+Durable memory remains enabled for deployment and requires a Cosmos DB backend
+supporting the toolkit's indexes. To test it locally against such a backend,
+replace the emulator connection and enable `ENABLE_COSMOS_MEMORY` in the AppHost.
+
 ---
 
 ## 5. Frontend dependencies

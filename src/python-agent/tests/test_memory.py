@@ -7,6 +7,8 @@ the chat endpoint from working.
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from expenses_agent.config import Settings, load_settings
@@ -59,6 +61,28 @@ async def test_backend_failure_is_reported_but_not_raised(monkeypatch: pytest.Mo
     assert await memory.start(_settings()) is None
     assert memory.is_enabled is False
     assert "cosmos is down" in memory.error
+
+
+@pytest.mark.parametrize("close_error", [None, RuntimeError("close failed")])
+async def test_backend_failure_closes_partial_client(monkeypatch: pytest.MonkeyPatch, close_error):
+    memory = CosmosMemory()
+    client = AsyncMock()
+    client.close.side_effect = close_error
+
+    async def boom(_settings):
+        memory._client = client
+        raise RuntimeError("indexing policy rejected")
+
+    monkeypatch.setattr(memory, "_build", boom)
+
+    assert await memory.start(_settings()) is None
+    client.close.assert_awaited_once()
+    assert memory._client is None
+    assert memory.is_enabled is False
+    assert "indexing policy rejected" in memory.error
+
+    await memory.stop()
+    client.close.assert_awaited_once()
 
 
 async def test_provider_is_returned_when_the_backend_builds(monkeypatch: pytest.MonkeyPatch):
