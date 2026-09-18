@@ -427,3 +427,6 @@ FodyWeavers.xsd
 
 
 
+
+# TypeScript incremental build info
+*.tsbuildinfo

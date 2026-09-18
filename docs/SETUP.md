@@ -1,220 +1,162 @@
 # Setup Guide
 
-Everything a new developer needs to configure this repository before running it,
-in order. See [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for how the pieces fit
-together.
+Everything needed to run this repository locally, in order. See
+[`../README.md`](../README.md) for how the pieces fit together.
 
 ---
 
-## 1. Prerequisites (tooling)
+## 1. Prerequisites
 
 | Tool | Version | Install (Windows) |
 | --- | --- | --- |
 | .NET SDK | 10.0+ | `winget install Microsoft.DotNet.SDK.10` |
-| Python | 3.11+ | `winget install Python.Python.3.13` |
+| Python | 3.11+ (3.13/3.14 tested) | `winget install Python.Python.3.13` |
 | Node.js + npm | LTS | `winget install OpenJS.NodeJS.LTS` |
-| Podman (container runtime) | 5.x | `winget install RedHat.Podman` |
+| Podman | 5.x+ | `winget install RedHat.Podman` |
 | Azure CLI | 2.7x+ | `winget install Microsoft.AzureCLI` |
-| Aspire CLI | 13.4+ | `dotnet tool install -g aspire.cli` (or the installer from aspire.dev) |
+| Aspire CLI | 13.5+ | `curl -sSL https://aspire.dev/install.sh \| bash` (or the Windows installer) |
 
-> This repo uses **Podman** as the container runtime. After installing, run
-> `podman machine init` and `podman machine start` once. Aspire auto-detects
-> Podman when Docker is absent.
-
-Restore the repo-local **Data API builder CLI** (pinned in `.config/dotnet-tools.json`):
+This repo uses **Podman** as the container runtime. After installing:
 
 ```bash
-dotnet tool restore
+podman machine init
+podman machine start
 ```
+
+The AppHost launch profiles already set `DOTNET_ASPIRE_CONTAINER_RUNTIME=podman`
+(see `src/aspire/aspire.config.json`), so Aspire uses Podman even though Docker
+is not installed.
+
+> **Windows on ARM:** create the Python virtual environment with an **x64**
+> interpreter. Several dependencies (`cryptography`, `grpcio`, `pydantic-core`)
+> ship no `win_arm64` wheels and would otherwise try to build from source.
 
 ---
 
 ## 2. Azure prerequisites
 
-You need, in your own Azure subscription / Entra tenant:
-
-1. An **Azure AI Foundry** project with a **chat model deployment** (e.g. `gpt-5`
-   or `gpt-4.1`). Note the **project endpoint** (`https://<name>.services.ai.azure.com/`).
-2. **Azure AI Content Understanding**, which is part of the Foundry / AI Services
-   resource. Note its **cognitive-services endpoint**
-   (`https://<name>.cognitiveservices.azure.com/`) and ensure the required CU
-   default model deployments exist (GPT-4.1, GPT-4.1-mini, text-embedding-3-large).
-3. Permission to **create an app registration** in your Entra tenant (below).
-
-Sign in:
-
-```bash
-az login
-```
+1. Sign in: `az login`.
+2. You need permission to create (or reuse) an **Azure AI Foundry** account in a
+   resource group. The AppHost provisions the account, a project and three model
+   deployments (`gpt5`, `gpt5mini`, `TextEmbedding3Large`) on first run.
+3. **Content Understanding** lives on the same AI Services account. Import the
+   analyzer definition in [`../src/analyzers/ExpensesAnalyzer.json`](../src/analyzers/ExpensesAnalyzer.json)
+   as an analyzer named **`ExpensesAnalyzer`**.
 
 ---
 
-## 3. Create the Entra app registration (MCP audience)
-
-The MCP servers are reached by the Foundry-hosted agent over **public ingress**,
-so their `/mcp` endpoints validate **Entra JWTs**. This app registration defines
-the **audience** the servers validate and the agent requests a token for.
-
-Aspire/`azd` provisions managed identities + RBAC automatically, but it does **not**
-create this app registration — do it once:
-
-```bash
-# Create the app registration that represents the MCP API (the audience)
-appId=$(az ad app create --display-name "expenses-mcp" --sign-in-audience AzureADMyOrg --query appId -o tsv)
-az ad app update --id "$appId" --identifier-uris "api://$appId"
-az ad sp create --id "$appId"          # service principal so tokens can target it
-
-tenantId=$(az account show --query tenantId -o tsv)
-echo "Audience (client-id): $appId"
-echo "Tenant:               $tenantId"
-```
-
-> **Audience format:** Entra **v2.0** tokens carry `aud = <client-id GUID>`, not the
-> `api://…` URI. Use the **client-id GUID** as the audience value below; the agent
-> requests `<client-id>/.default` and the token's `aud` matches what the servers validate.
-
-**Enable local development tokens.** When you run locally, the agent authenticates
-as *you* (`az login`), not a managed identity. For your user token to be accepted by
-the MCP servers, the app must expose a delegated scope and pre-authorize the Azure
-CLI (client `04b07795-8ddb-461a-bbee-02f9e1bf7b46`) so `<client-id>/.default` works
-without an interactive consent prompt (otherwise you get `AADSTS65001`). Add a
-delegated scope `access_as_user`, set `requestedAccessTokenVersion = 2`, and add the
-Azure CLI to `preAuthorizedApplications` via two `az rest PATCH` calls to
-`https://graph.microsoft.com/v1.0/applications/$objectId` (scope first, then the
-pre-authorization). When deployed, the agent's **managed identity** obtains an
-app-only token instead — no user consent involved.
-
-You can reuse this one registration for both MCP servers (default), or create a
-second one for tighter isolation.
-
----
-
-## 4. Configure AppHost secrets
+## 3. AppHost configuration
 
 All configuration is stored as AppHost **user secrets**. Run from `src/aspire`:
 
 ```bash
 cd src/aspire
 
-# --- Azure deployment target ---
-aspire secret set Azure:SubscriptionId  "<your-subscription-id>"
-aspire secret set Azure:ResourceGroup   "<your-resource-group>"
-aspire secret set Azure:Location        "<your-azure-region>"
+# Where the Azure resources are provisioned
+aspire secret set Azure:SubscriptionId "<your-subscription-id>"
+aspire secret set Azure:ResourceGroup  "<your-resource-group>"
+aspire secret set Azure:Location       "<your-azure-region>"
+aspire secret set Azure:TenantId       "<your-tenant-id>"
 
-# --- Foundry ---
-aspire secret set Parameters:existingFoundryName          "<your-foundry-name>"
-aspire secret set Parameters:existingFoundryResourceGroup "<foundry-resource-group>"
+# Content Understanding endpoint (the AI Services account, with trailing slash)
+aspire secret set Parameters:contentUnderstandingEndpoint "https://<name>.services.ai.azure.com/"
 ```
 
-The AppHost sources the **agent + MCP configuration from environment variables**
-(read via `builder.Configuration`, so they show up on each resource in the Aspire
-dashboard). Set them either as real environment variables or as AppHost secrets
-(secrets populate the same configuration):
+Everything else — the Cosmos connection string, the model deployment connection
+string, service URLs and the OTLP endpoint — is injected by Aspire at run time.
 
-```bash
-# Foundry / model
-aspire secret set FOUNDRY_PROJECT_ENDPOINT "https://<name>.services.ai.azure.com/"
-aspire secret set FOUNDRY_MODEL            "gpt-5"
-
-# Content Understanding
-aspire secret set AZURE_CONTENTUNDERSTANDING_ENDPOINT "https://<name>.cognitiveservices.azure.com/"
-
-# Entra auth for the MCP endpoints (from step 3). Audience = app client-id GUID.
-aspire secret set AZURE_AD_TENANT_ID "<tenant-id>"
-aspire secret set AZURE_AD_AUDIENCE  "<app-client-id>"
-aspire secret set AZURE_AD_ISSUER    "https://login.microsoftonline.com/<tenant-id>/v2.0"
-aspire secret set SQL_MCP_SCOPE      "<app-client-id>/.default"
-aspire secret set STORAGE_MCP_SCOPE  "<app-client-id>/.default"
-```
-
-**How each environment variable is used:**
-
-| Env variable | Used by | Effect |
-| --- | --- | --- |
-| `AZURE_AD_AUDIENCE` + `AZURE_AD_ISSUER` | SQL MCP (DAB) | validate Entra tokens on `/mcp` |
-| `AZURE_AD_TENANT_ID` + `AZURE_AD_AUDIENCE` | Storage MCP | JWT bearer auth + `RequireAuthorization()` on `/mcp` |
-| `SQL_MCP_SCOPE` / `STORAGE_MCP_SCOPE` | Agent | scope the agent requests a token for (`<aud>/.default`) |
-| `AZURE_CONTENTUNDERSTANDING_ENDPOINT` | Agent | Content Understanding endpoint |
-| `FOUNDRY_PROJECT_ENDPOINT` / `FOUNDRY_MODEL` | Agent | Foundry chat client |
-
-> The AppHost contains **no hard-coded values** — every resource env value comes
-> from an environment variable (`builder.Configuration["..."]`). If an Entra
-> variable is empty, that MCP server accepts anonymous calls (handy for local dev);
-> set them to require Entra tokens. The agent acquires tokens automatically via
-> managed identity / `DefaultAzureCredential`.
+> User secrets are keyed by the **path** of `apphost.cs`, so a fresh clone or a
+> git worktree starts with an empty secret store. Run `aspire secret list` to check.
 
 ---
 
-## 5. Python agent virtual environment
+## 4. Python virtual environment
 
-The Python `expenses-agent` runs via Aspire's `AddPythonApp`, which uses the
-`.venv` in the agent directory. Create it once:
+Aspire's `AddPythonApp` uses the `.venv` inside the agent directory.
 
 ```bash
-cd src/expenses-agent-python
-python -m venv .venv
-. .venv/Scripts/Activate.ps1          # Windows PowerShell (use .venv/bin/activate on macOS/Linux)
-python -m pip install --upgrade pip
-python -m pip install --pre -r requirements.txt # --pre: Content Understanding packages are pre-release
+cd src/python-agent
+py -3.13 -m venv .venv                 # use an x64 interpreter on ARM devices
+.venv/Scripts/python -m pip install --upgrade pip
+.venv/Scripts/python -m pip install --pre -e .
 ```
 
-The agent authenticates with `DefaultAzureCredential`, so `az login` (step 2) is
-enough locally.
+`--pre` is required: the Content Understanding and Cosmos memory packages are
+pre-release. The agent authenticates with `DefaultAzureCredential`, so `az login`
+is enough locally.
 
 ---
 
-## 6. Frontend dependencies
+## 5. Frontend dependencies
 
 ```bash
 cd src/frontend
 npm install
+npm approve-scripts esbuild     # npm 11+ asks before running install scripts
 ```
-
-(Aspire also restores these on first run.)
 
 ---
 
-## 7. Run locally
+## 6. Run
 
 ```bash
 cd src/aspire
 aspire run
 ```
 
-Aspire (on Podman) starts: SQL Server + schema, the SQL MCP Server (DAB), the
-Storage MCP Server + Azurite, the Cosmos emulator, the Python agent (uvicorn), and
-the Vite frontend. Open the dashboard link it prints; use the **external** URL for
-`frontend` from your phone.
+Aspire starts, in order: the Cosmos preview emulator (Podman), the MCP server
+(which creates the `db` database and the `trips` / `expenses` / `conversations`
+containers), the Python agent, and the Vite frontend. Open the dashboard URL it
+prints, then the **frontend** endpoint and go to `/home`.
+
+To use it from a phone, open the frontend's external URL on the same network —
+the Vite dev server proxies `/chat` and `/api` to the agent, so no extra
+configuration is needed.
 
 ---
 
-## 8. Deploy to Azure
+## 7. Verify
 
 ```bash
-cd src/aspire
-aspire deploy
+# MCP server (C#)
+dotnet test src/mcp-server.tests/mcp-server.tests.csproj
+
+# Agent (Python)
+cd src/python-agent && .venv/Scripts/python -m pytest
+
+# Frontend
+cd src/frontend && npm test
 ```
 
-This provisions **Azure SQL Database**, **Azure Container Apps** (SQL MCP, Storage
-MCP, agent, frontend), **Azure Storage**, and creates **managed identities + RBAC**
-automatically.
+The Python suite includes cross-language contract tests that run only when
+`MCP_SERVER_URL` is set:
 
-**After the first deploy — grant the agent's managed identity access:**
+```powershell
+$env:Cosmos__UseInMemory = "true"
+dotnet run --project src/mcp-server/mcp-server.csproj --no-launch-profile --urls http://localhost:5290
+# in another shell
+cd src/python-agent
+$env:MCP_SERVER_URL = "http://localhost:5290"
+.venv/Scripts/python -m pytest tests/test_mcp_contract.py
+```
 
-- **Blob**: `Storage Blob Data Reader` + `Storage Blob Delegator` (add
-  `Storage Blob Data Contributor` if the agent must upload/delete).
-- **Content Understanding**: the CU role(s) on the AI Services resource
-  ([What's new](https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/whats-new)).
+Health checks:
 
-(Aspire assigns the SQL DB user automatically via its deployment script.)
+* MCP server: `GET /health` → `Healthy`
+* Agent: `GET /health` → JSON including `agentReady`, `durableMemory` and the
+  resolved endpoints. Use it to confirm the Foundry, Content Understanding and
+  MCP endpoints were injected correctly.
 
 ---
 
-## 9. Optional hardening
+## 8. Troubleshooting
 
-- **Restrict MCP callers to the agent only:** define an **app role** on the
-  `expenses-mcp` registration and assign it to the agent's managed identity, then
-  check the role on the servers (currently they validate `aud` + `iss` only).
-- **Lock down the SQL MCP:** remove the `anonymous` permission from the entities in
-  `src/expenses-database/dab-config.json` so only authenticated (Entra) calls work.
-- **Prefer managed identity everywhere** (already the default); avoid client secrets.
+| Symptom | Cause and fix |
+| --- | --- |
+| `Cannot add resource ... with name 'expenses'` | Aspire resource names are unique app-wide. The Foundry project is `expenses`, so the Cosmos container resource is registered as `expense-records`. |
+| Agent `/health` never responds | Something else is holding its port. Stop stray `python`/`ExpensesMcpServer` processes from a previous run and restart. |
+| `Tool X has an output schema but did not return structured content` | An MCP tool that can return `null` must not declare an output schema — see the comments on `get_trip` / `get_expense` / `get_conversation`. |
+| `Failed to parse indexing policy` | The Cosmos **preview emulator** does not support the vector index the memory toolkit creates. The agent falls back automatically; set `ENABLE_COSMOS_MEMORY=false` to silence it. |
+| Chat returns HTTP 429 | The Foundry model deployment is rate limited. Wait, or raise the deployment's quota. |
+| `unsupported operand type(s) for +: 'float' and 'datetime.timedelta'` | `mcp` 2.x is installed. The Agent Framework requires `mcp` 1.x — reinstall with `pip install "mcp>=1.29,<2"`. |
+| Containers do not start | `podman machine start`, then confirm `DOTNET_ASPIRE_CONTAINER_RUNTIME=podman` is set in `src/aspire/aspire.config.json`. |
