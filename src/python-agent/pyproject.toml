@@ -15,6 +15,7 @@ dependencies = [
 
     # YAML parsing (Content Understanding emits YAML)
     "pyyaml>=6.0",
+    "pillow>=11",
 
     # HTTP client
     "httpx>=0.27",
@@ -28,6 +29,7 @@ dependencies = [
 
     # Azure
     "azure-identity>=1.19",
+    "azure-ai-contentunderstanding>=1.0.0,<2",
 
     # Microsoft Agent Framework
     "agent-framework-core",
@@ -46,19 +48,11 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["expenses_agent"]
 
-[dependency-groups]
-dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.24",
-    "httpx>=0.27",
-]
+[tool.hatch.build.hooks.custom]
 
 [tool.uv]
 prerelease = "allow"
 
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]
-
 [project.scripts]
 expenses-agent = "expenses_agent.main:main"
+expenses-analyzer-bootstrap = "expenses_agent.bootstrap:main"

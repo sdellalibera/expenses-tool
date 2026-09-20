@@ -55,6 +55,10 @@ class Settings:
     foundry_deployment: str | None = None
     content_understanding_endpoint: str | None = None
     analyzer_id: str = "ExpensesAnalyzer"
+    content_understanding_completion_deployment: str = "gpt5"
+    content_understanding_mini_deployment: str = "gpt5mini"
+    content_understanding_embedding_deployment: str = "TextEmbedding3Large"
+    content_understanding_bootstrap_timeout: float = 300.0
     # Which sections of the Content Understanding analysis reach the model.
     # "fields" only keeps the structured receipt fields and drops the full page
     # markdown, which is what `to_llm_input` strips the raw analysis down to.
@@ -125,6 +129,25 @@ def load_settings() -> Settings:
         "AZURE_CONTENTUNDERSTANDING_ENDPOINT",
     )
     settings.analyzer_id = _first_env("CONTENT_UNDERSTANDING_ANALYZER_ID", default="ExpensesAnalyzer") or "ExpensesAnalyzer"
+    mini = _parse_connection_string(_first_env("ConnectionStrings__gpt5mini", default="") or "")
+    embedding = _parse_connection_string(
+        _first_env("ConnectionStrings__TextEmbedding3Large", "ConnectionStrings__textembedding3large", default="") or ""
+    )
+    settings.content_understanding_completion_deployment = (
+        _first_env("CONTENT_UNDERSTANDING_COMPLETION_DEPLOYMENT", "CU_COMPLETION_MODEL_DEPLOYMENT")
+        or connection.get("deployment") or settings.foundry_deployment or "gpt5"
+    )
+    settings.content_understanding_mini_deployment = (
+        _first_env("CONTENT_UNDERSTANDING_MINI_DEPLOYMENT", "CU_COMPLETION_MINI_DEPLOYMENT")
+        or mini.get("deployment") or mini.get("model") or "gpt5mini"
+    )
+    settings.content_understanding_embedding_deployment = (
+        _first_env("CONTENT_UNDERSTANDING_EMBEDDING_DEPLOYMENT", "CU_EMBEDDING_DEPLOYMENT")
+        or embedding.get("deployment") or embedding.get("model") or "TextEmbedding3Large"
+    )
+    settings.content_understanding_bootstrap_timeout = float(
+        _first_env("CONTENT_UNDERSTANDING_BOOTSTRAP_TIMEOUT", default="300") or "300"
+    )
 
     sections = _first_env("CONTENT_UNDERSTANDING_OUTPUT_SECTIONS")
     if sections:
@@ -137,12 +160,18 @@ def load_settings() -> Settings:
 
     # Cosmos DB, used directly by the durable-memory provider (records still go
     # through the MCP server).
-    cosmos = _parse_connection_string(_first_env("ConnectionStrings__cosmos-db", default="") or "")
-    settings.cosmos_endpoint = _first_env("COSMOS_ENDPOINT") or cosmos.get("accountendpoint")
+    cosmos_connection = (_first_env("ConnectionStrings__cosmos-db", default="") or "").strip()
+    cosmos = _parse_connection_string(cosmos_connection)
+    # Aspire publishes an endpoint for managed identity, but the emulator uses
+    # AccountEndpoint/AccountKey. Neither form should require a production key.
+    cosmos_endpoint = cosmos.get("accountendpoint")
+    if not cosmos_endpoint and cosmos_connection.lower().startswith(("https://", "http://")):
+        cosmos_endpoint = cosmos_connection
+    settings.cosmos_endpoint = _first_env("COSMOS_ENDPOINT") or cosmos_endpoint
     settings.cosmos_key = _first_env("COSMOS_KEY") or cosmos.get("accountkey")
     settings.cosmos_database = _first_env("COSMOS_DATABASE", default="db") or "db"
     settings.memory_chat_model = _first_env("MEMORY_CHAT_MODEL") or settings.foundry_deployment
-    settings.memory_embedding_model = _first_env("MEMORY_EMBEDDING_MODEL")
+    settings.memory_embedding_model = _first_env("MEMORY_EMBEDDING_MODEL") or embedding.get("deployment") or embedding.get("model")
     settings.memory_top_k = int(_first_env("MEMORY_TOP_K", default="5") or "5")
     settings.enable_cosmos_memory = (_first_env("ENABLE_COSMOS_MEMORY", default="true") or "true").lower() not in {
         "false",

@@ -10,16 +10,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Aspire.Microsoft.Azure.Cosmos" Version="13.5.3" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../servicedefaults/servicedefaults.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <InternalsVisibleTo Include="ExpensesMcpServer.Tests" />
+    <ProjectReference Include="../expenses-data/expenses-data.csproj" />
   </ItemGroup>
 
 </Project>

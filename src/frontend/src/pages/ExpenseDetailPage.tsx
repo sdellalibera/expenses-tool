@@ -15,11 +15,14 @@ export default function ExpenseDetailPage() {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState(false);
 
   useEffect(() => {
     if (!expenseId) return;
     let cancelled = false;
     setLoading(true);
+    setTrip(null);
+    setPhotoError(false);
 
     api
       .getExpense(userId, expenseId)
@@ -51,6 +54,7 @@ export default function ExpenseDetailPage() {
   if (!expense) return <p className="state">Expense not found.</p>;
 
   const itemsTotal = expense.lineItems.reduce((sum, item) => sum + item.price * (item.quantity || 1), 0);
+  const photoUrl = expense.photoUrl ? api.expensePhotoUrl(userId, expense.id) : null;
 
   return (
     <section aria-label="Expense detail">
@@ -85,7 +89,15 @@ export default function ExpenseDetailPage() {
         </div>
         <div>
           <dt>Receipt</dt>
-          <dd>{expense.sourceImage ?? "—"}</dd>
+          <dd>
+            {photoUrl ? (
+              <a href={photoUrl} target="_blank" rel="noreferrer">
+                {expense.sourceImage || "View receipt"}
+              </a>
+            ) : (
+              expense.sourceImage ?? "—"
+            )}
+          </dd>
         </div>
         <div>
           <dt>Recorded</dt>
@@ -98,6 +110,27 @@ export default function ExpenseDetailPage() {
           </dd>
         </div>
       </dl>
+
+      {photoUrl && (
+        <>
+          <h2>Receipt image</h2>
+          {photoError ? (
+            <p className="state" role="status">
+              Receipt preview could not be loaded. Try opening the receipt link above.
+            </p>
+          ) : (
+            <a href={photoUrl} target="_blank" rel="noreferrer">
+              <img
+                className="receipt-photo"
+                src={photoUrl}
+                alt={`Receipt from ${expense.merchant}`}
+                loading="lazy"
+                onError={() => setPhotoError(true)}
+              />
+            </a>
+          )}
+        </>
+      )}
 
       {expense.notes && (
         <>

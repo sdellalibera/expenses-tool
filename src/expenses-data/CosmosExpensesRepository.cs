@@ -1,9 +1,10 @@
 using System.Net;
-using ExpensesMcpServer.Models;
+using Expenses.Data.Models;
 using Microsoft.Azure.Cosmos;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace ExpensesMcpServer.Data;
+namespace Expenses.Data;
 
 /// <summary>Cosmos DB backed implementation of <see cref="IExpensesRepository"/>.</summary>
 public sealed class CosmosExpensesRepository : IExpensesRepository
@@ -201,6 +202,8 @@ public sealed class CosmosExpensesRepository : IExpensesRepository
         existing.Currency = patch.Currency ?? existing.Currency;
         existing.LineItems = patch.LineItems ?? existing.LineItems;
         existing.Notes = patch.Notes ?? existing.Notes;
+        existing.SourceImage = patch.SourceImage ?? existing.SourceImage;
+        existing.PhotoUrl = patch.PhotoUrl ?? existing.PhotoUrl;
         existing.UpdatedAt = DateTimeOffset.UtcNow;
 
         var response = await Expenses.ReplaceItemAsync(existing, expenseId, new PartitionKey(userId), cancellationToken: cancellationToken);

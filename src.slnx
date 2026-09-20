@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="src/servicedefaults/servicedefaults.csproj" />
   <Project Path="src/mcp-server/mcp-server.csproj" />
-  <Project Path="src/mcp-server.tests/mcp-server.tests.csproj" />
+  <Project Path="src/expenses-data/expenses-data.csproj" />
+  <Project Path="src/expenses-api/expenses-api.csproj" />
 </Solution>

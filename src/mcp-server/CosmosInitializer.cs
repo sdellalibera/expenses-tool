@@ -1,4 +1,4 @@
-using ExpensesMcpServer.Data;
+using Expenses.Data;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Options;
 

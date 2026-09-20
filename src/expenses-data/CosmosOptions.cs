@@ -1,4 +1,4 @@
-namespace ExpensesMcpServer.Data;
+namespace Expenses.Data;
 
 /// <summary>
 /// Names of the Cosmos database and containers. The AppHost injects these as
