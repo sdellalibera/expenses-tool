@@ -37,8 +37,9 @@ class McpConversationHistoryProvider(HistoryProvider):
         self._client = client
         self._user_id = user_id
         self._max_messages = max_messages
-        self.pending_tool_calls: list[str] = []
-        self.pending_attachments: list[str] = []
+
+    def resolve_session(self, session_id: str | None) -> tuple[str | None, str | None]:
+        return self._user_id, session_id
 
     async def get_messages(
         self,
@@ -47,14 +48,15 @@ class McpConversationHistoryProvider(HistoryProvider):
         state: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> list[Message]:
-        if not session_id:
+        user_id, conversation_id = self.resolve_session(session_id)
+        if not user_id or not conversation_id:
             return []
 
         with tracer().start_as_current_span("conversation.load") as span:
-            span.set_attribute("expenses.user_id", self._user_id)
-            span.set_attribute("expenses.conversation_id", session_id)
+            span.set_attribute("expenses.user_id", user_id)
+            span.set_attribute("expenses.conversation_id", conversation_id)
 
-            conversation = await self._client.get_conversation(self._user_id, session_id)
+            conversation = await self._client.get_conversation(user_id, conversation_id)
             if not conversation:
                 span.set_attribute("expenses.history_count", 0)
                 return []
@@ -80,7 +82,8 @@ class McpConversationHistoryProvider(HistoryProvider):
         state: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
-        if not session_id:
+        user_id, conversation_id = self.resolve_session(session_id)
+        if not user_id or not conversation_id:
             return
 
         payload = self._to_payload(messages)
@@ -88,18 +91,15 @@ class McpConversationHistoryProvider(HistoryProvider):
             return
 
         with tracer().start_as_current_span("conversation.save") as span:
-            span.set_attribute("expenses.user_id", self._user_id)
-            span.set_attribute("expenses.conversation_id", session_id)
+            span.set_attribute("expenses.user_id", user_id)
+            span.set_attribute("expenses.conversation_id", conversation_id)
             span.set_attribute("expenses.message_count", len(payload))
 
-            await self._client.append_conversation_messages(self._user_id, session_id, payload)
+            await self._client.append_conversation_messages(user_id, conversation_id, payload)
             logger.info("Persisted %d message(s) for conversation %s", len(payload), session_id)
 
     def _to_payload(self, messages: Sequence[Message]) -> list[dict[str, Any]]:
         payload: list[dict[str, Any]] = []
-        tool_calls = list(self.pending_tool_calls)
-        attachments = list(self.pending_attachments)
-
         for message in messages:
             role = str(getattr(message.role, "value", message.role) or "user")
             if role not in _REPLAYED_ROLES:
@@ -107,25 +107,27 @@ class McpConversationHistoryProvider(HistoryProvider):
 
             text = (message.text or "").strip()
             calls = collect_tool_calls(message)
+            properties = message.additional_properties or {}
             if not text and not calls:
                 continue
 
             payload.append(
                 {
                     "role": role,
-                    "text": text,
-                    "toolCalls": calls or (tool_calls if role == "assistant" else []),
-                    "attachments": attachments if role == "user" else [],
+                    "text": properties.get("displayText", text),
+                    "receiptContext": properties.get("receiptContext") if role == "user" else None,
+                    "toolCalls": calls or properties.get("toolCalls", []),
+                    "attachments": properties.get("attachments", []) if role == "user" else [],
                 }
             )
 
-        self.pending_tool_calls = []
-        self.pending_attachments = []
         return payload
 
 
 def _text_of(item: dict[str, Any]) -> str:
-    return (item.get("text") or "").strip()
+    return "\n\n".join(
+        value.strip() for value in (item.get("text"), item.get("receiptContext")) if value and value.strip()
+    )
 
 
 def collect_tool_calls(message: Message) -> list[str]:

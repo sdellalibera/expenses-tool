@@ -1,0 +1,10 @@
+**/.venv
+**/node_modules
+**/bin
+**/obj
+**/dist
+**/__pycache__
+**/*.pyc
+**/.env*
+**/appsettings.Development.json
+**/.azure

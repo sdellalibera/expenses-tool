@@ -1,6 +1,6 @@
 using System.ComponentModel;
-using ExpensesMcpServer.Data;
-using ExpensesMcpServer.Models;
+using Expenses.Data;
+using Expenses.Data.Models;
 using ModelContextProtocol.Server;
 
 namespace ExpensesMcpServer.Tools;

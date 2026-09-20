@@ -1,6 +1,6 @@
-using ExpensesMcpServer.Models;
+using Expenses.Data.Models;
 
-namespace ExpensesMcpServer.Data;
+namespace Expenses.Data;
 
 /// <summary>Helpers shared by the Cosmos and in-memory repositories.</summary>
 internal static class ConversationTitle

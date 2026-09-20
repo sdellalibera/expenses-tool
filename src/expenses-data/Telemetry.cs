@@ -1,15 +1,15 @@
 using System.Diagnostics;
 
-namespace ExpensesMcpServer.Data;
+namespace Expenses.Data;
 
 /// <summary>
-/// Single <see cref="ActivitySource"/> for every CRUD operation the MCP server
-/// performs. The AppHost wires the OTLP exporter, so these spans show up in the
+/// Single <see cref="ActivitySource"/> for record operations in both services.
+/// The AppHost wires the OTLP exporter, so these spans show up in the
 /// Aspire dashboard traces view next to the agent and frontend spans.
 /// </summary>
 public static class Telemetry
 {
-    public const string ActivitySourceName = "ExpensesMcpServer";
+    public const string ActivitySourceName = "Expenses.Data";
 
     public static readonly ActivitySource ActivitySource = new(ActivitySourceName);
 

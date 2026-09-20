@@ -36,6 +36,8 @@ def configure(service_name: str = "expenses-agent", *, enable_sensitive_data: bo
     logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
     logging.getLogger("azure.identity").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    # MCP requests may contain deterministic upload payloads, never log their bodies.
+    logging.getLogger("mcp").setLevel(logging.WARNING)
 
     os.environ.setdefault("OTEL_SERVICE_NAME", service_name)
 

@@ -1,12 +1,11 @@
 using System.Collections.Concurrent;
-using ExpensesMcpServer.Models;
+using Expenses.Data.Models;
 
-namespace ExpensesMcpServer.Data;
+namespace Expenses.Data;
 
 /// <summary>
-/// Thread-safe in-memory repository. Used by the unit tests, and as a fallback
-/// when <c>Cosmos:UseInMemory</c> is set so the MCP server can be started
-/// without a database (handy for smoke tests).
+/// Process-local repository for explicitly opted-in development smoke runs.
+/// Aspire always uses Cosmos so the MCP server and read API share data.
 /// </summary>
 public sealed class InMemoryExpensesRepository : IExpensesRepository
 {
@@ -128,6 +127,8 @@ public sealed class InMemoryExpensesRepository : IExpensesRepository
         expense.Currency = patch.Currency ?? expense.Currency;
         expense.LineItems = patch.LineItems ?? expense.LineItems;
         expense.Notes = patch.Notes ?? expense.Notes;
+        expense.SourceImage = patch.SourceImage ?? expense.SourceImage;
+        expense.PhotoUrl = patch.PhotoUrl ?? expense.PhotoUrl;
         expense.UpdatedAt = DateTimeOffset.UtcNow;
 
         return Task.FromResult<Expense?>(expense);

@@ -1,17 +1,7 @@
 """FastAPI surface of the expenses agent.
 
-The React frontend only ever talks to this service:
-
-* ``POST /chat``                     – one chat turn (text + optional receipt photos)
-* ``GET  /health``                   – liveness/readiness for Aspire
-* ``GET  /api/trips``                – trips of a user, with expense roll-ups
-* ``GET  /api/trips/{tripId}``       – one trip
-* ``GET  /api/expenses``             – expenses of a user, optionally per trip
-* ``GET  /api/expenses/{expenseId}`` – one expense
-* ``GET  /api/conversations``        – chat history index
-* ``GET  /api/conversations/{id}``   – one transcript
-
-Everything under ``/api`` is proxied to the MCP server, which owns Cosmos DB.
+Chat and explicit delete commands go through this service and the MCP server.
+The separate .NET API serves all frontend reads, including private receipt photos.
 """
 
 from __future__ import annotations
@@ -26,6 +16,7 @@ from fastapi.responses import JSONResponse
 
 from .agent import Attachment, ExpensesAgent
 from .config import Settings, load_settings
+from .images import SUPPORTED_IMAGE_TYPES, validate_image
 from .mcp_client import ExpensesMcpClient, McpToolError
 from .observability import configure, instrument_app
 
@@ -37,7 +28,7 @@ MAX_UPLOAD_BYTES = 12 * 1024 * 1024
 def create_app(settings: Settings | None = None, agent: ExpensesAgent | None = None) -> FastAPI:
     """Build the FastAPI application.
 
-    ``agent`` can be injected by the tests to avoid touching Azure.
+    An injected ``agent`` lets the caller own its lifecycle.
     """
     settings = settings or load_settings()
     configure(settings.service_name, enable_sensitive_data=settings.enable_sensitive_telemetry)
@@ -47,11 +38,11 @@ def create_app(settings: Settings | None = None, agent: ExpensesAgent | None = N
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         instance = agent or ExpensesAgent(settings)
-        if owns_agent:
-            await instance.start()
         application.state.agent = instance
         application.state.settings = settings
         try:
+            if owns_agent:
+                await instance.start()
             yield
         finally:
             if owns_agent:
@@ -115,18 +106,27 @@ def create_app(settings: Settings | None = None, agent: ExpensesAgent | None = N
 
         attachments: list[Attachment] = []
         for upload in images or []:
-            if not upload.filename:
-                continue
-            data = await upload.read()
+            filename = upload.filename or "receipt"
+            content_type = (upload.content_type or "").split(";", 1)[0].strip().lower()
+            if content_type not in SUPPORTED_IMAGE_TYPES:
+                raise HTTPException(
+                    status_code=415,
+                    detail=f"'{filename}' must be a JPEG, PNG, GIF, WebP, BMP or TIFF image.",
+                )
+            data = await upload.read(MAX_UPLOAD_BYTES + 1)
             if not data:
-                continue
+                raise HTTPException(status_code=400, detail=f"'{filename}' is empty. Choose a receipt photo.")
             if len(data) > MAX_UPLOAD_BYTES:
-                raise HTTPException(status_code=413, detail=f"'{upload.filename}' is larger than 12 MB.")
+                raise HTTPException(status_code=413, detail=f"'{filename}' is larger than 12 MiB.")
+            try:
+                validate_image(data, content_type)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=f"'{filename}': {exc}") from exc
             attachments.append(
                 Attachment(
                     data=data,
-                    content_type=upload.content_type or "image/jpeg",
-                    filename=upload.filename,
+                    content_type=content_type,
+                    filename=filename,
                 )
             )
 
@@ -161,28 +161,9 @@ def create_app(settings: Settings | None = None, agent: ExpensesAgent | None = N
 
         return turn.to_dict()
 
-    # ---- records (proxied to the MCP server) -------------------------
+    # ---- commands (MCP remains the write boundary) -------------------
 
-    @app.get("/api/trips", tags=["records"])
-    async def list_trips(
-        request: Request,
-        userId: Annotated[str, Query(description="Identifier of the user.")],
-        status: Annotated[str | None, Query(description="open, submitted or closed.")] = None,
-    ) -> list[dict[str, Any]]:
-        return await mcp_of(request).list_trips(userId, status)
-
-    @app.get("/api/trips/{trip_id}", tags=["records"])
-    async def get_trip(
-        request: Request,
-        trip_id: str,
-        userId: Annotated[str, Query(description="Identifier of the user.")],
-    ) -> dict[str, Any]:
-        trip = await mcp_of(request).get_trip(userId, trip_id)
-        if not trip:
-            raise HTTPException(status_code=404, detail=f"Trip '{trip_id}' was not found.")
-        return trip
-
-    @app.delete("/api/trips/{trip_id}", tags=["records"])
+    @app.delete("/commands/trips/{trip_id}", tags=["commands"])
     async def delete_trip(
         request: Request,
         trip_id: str,
@@ -193,26 +174,7 @@ def create_app(settings: Settings | None = None, agent: ExpensesAgent | None = N
             raise HTTPException(status_code=404, detail=f"Trip '{trip_id}' was not found.")
         return {"deleted": True, "tripId": trip_id}
 
-    @app.get("/api/expenses", tags=["records"])
-    async def list_expenses(
-        request: Request,
-        userId: Annotated[str, Query(description="Identifier of the user.")],
-        tripId: Annotated[str | None, Query(description="Restrict to one trip.")] = None,
-    ) -> list[dict[str, Any]]:
-        return await mcp_of(request).list_expenses(userId, tripId)
-
-    @app.get("/api/expenses/{expense_id}", tags=["records"])
-    async def get_expense(
-        request: Request,
-        expense_id: str,
-        userId: Annotated[str, Query(description="Identifier of the user.")],
-    ) -> dict[str, Any]:
-        expense = await mcp_of(request).get_expense(userId, expense_id)
-        if not expense:
-            raise HTTPException(status_code=404, detail=f"Expense '{expense_id}' was not found.")
-        return expense
-
-    @app.delete("/api/expenses/{expense_id}", tags=["records"])
+    @app.delete("/commands/expenses/{expense_id}", tags=["commands"])
     async def delete_expense(
         request: Request,
         expense_id: str,
@@ -222,24 +184,6 @@ def create_app(settings: Settings | None = None, agent: ExpensesAgent | None = N
         if not deleted:
             raise HTTPException(status_code=404, detail=f"Expense '{expense_id}' was not found.")
         return {"deleted": True, "expenseId": expense_id}
-
-    @app.get("/api/conversations", tags=["records"])
-    async def list_conversations(
-        request: Request,
-        userId: Annotated[str, Query(description="Identifier of the user.")],
-    ) -> list[dict[str, Any]]:
-        return await mcp_of(request).list_conversations(userId)
-
-    @app.get("/api/conversations/{conversation_id}", tags=["records"])
-    async def get_conversation(
-        request: Request,
-        conversation_id: str,
-        userId: Annotated[str, Query(description="Identifier of the user.")],
-    ) -> dict[str, Any]:
-        conversation = await mcp_of(request).get_conversation(userId, conversation_id)
-        if not conversation:
-            raise HTTPException(status_code=404, detail=f"Conversation '{conversation_id}' was not found.")
-        return conversation
 
     @app.exception_handler(McpToolError)
     async def mcp_error_handler(_: Request, exc: McpToolError) -> JSONResponse:

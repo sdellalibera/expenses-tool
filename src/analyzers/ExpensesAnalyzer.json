@@ -1,90 +1,78 @@
 {
-	"analyzerId": "ExpensesAnalyzer",
-	"description": "This analyzer should be used for expenses in the expenses demo",
-	"createdAt": "2026-08-26T08:51:48Z",
-	"lastModifiedAt": "2026-08-26T08:51:48Z",
-	"baseAnalyzerId": "prebuilt-document",
-	"config": {
-		"returnDetails": false,
-		"enableOcr": true,
-		"enableLayout": true,
-		"enableFormula": true,
-		"enableFigureDescription": false,
-		"enableFigureAnalysis": false,
-		"chartFormat": "chartjs",
-		"workflow": "standard.2026-06-01-preview",
-		"tableFormat": "html",
-		"enableSegment": false,
-		"omitContent": false,
-		"segmentPerPage": false,
-		"allowInPageSegments": false,
-		"annotationFormat": "markdown"
-	},
-	"warnings": [],
-	"status": "ready",
-	"processingLocation": "geography",
-	"supportedModels": {
-		"completion": [
-			"gpt-4o",
-			"gpt-4o-mini",
-			"gpt-4.1",
-			"gpt-4.1-mini",
-			"gpt-4.1-nano",
-			"gpt-5",
-			"gpt-5-mini",
-			"gpt-5-nano",
-			"gpt-5.1",
-			"gpt-5.2",
-			"gpt-5.4",
-			"gpt-5.4-mini",
-			"gpt-5.5"
-		]
-	},
-	"models": {
-		"completion": "gpt-5.4",
-		"embedding": "text-embedding-3-large"
-	},
-	"fieldSchema": {
-		"fields": {
-			"TotalAmount": {
-				"type": "number",
-				"method": "extract",
-				"description": "Total amount payed"
-			},
-			"LineItems": {
-				"type": "array",
-				"method": "generate",
-				"description": "All line items in the receipt",
-				"items": {
-					"type": "object",
-					"properties": {
-						"Title": {
-							"type": "string",
-							"method": "extract",
-							"description": "name of specific line item",
-							"estimateSourceAndConfidence": true
-						},
-						"Price": {
-							"type": "number",
-							"method": "extract",
-							"description": "price of specific line item",
-							"estimateSourceAndConfidence": true
-						}
-					}
-				}
-			},
-			"Name": {
-				"type": "string",
-				"method": "extract",
-				"description": "Name of the business or hotel",
-				"estimateSourceAndConfidence": true
-			},
-			"Category": {
-				"type": "string",
-				"method": "extract",
-				"description": "Category of expense (food, ground transport, hotel, etc)",
-				"estimateSourceAndConfidence": true
-			}
-		}
-	}
+  "description": "Extract business-travel expense fields from a receipt. Application identifiers, image URLs and timestamps are supplied by the application, not extracted or invented.",
+  "baseAnalyzerId": "prebuilt-document",
+  "config": {
+    "returnDetails": false,
+    "enableOcr": true,
+    "enableLayout": true,
+    "estimateFieldSourceAndConfidence": true
+  },
+  "models": {
+    "completion": "gpt-5",
+    "embedding": "text-embedding-3-large"
+  },
+  "fieldSchema": {
+    "fields": {
+      "merchant": {
+        "type": "string",
+        "method": "extract",
+        "description": "Name of the merchant, restaurant, hotel or service provider."
+      },
+      "category": {
+        "type": "string",
+        "method": "generate",
+        "description": "Expense category: food, hotel, flight, ground transport, or other."
+      },
+      "date": {
+        "type": "date",
+        "method": "extract",
+        "description": "Receipt transaction date in YYYY-MM-DD format. Leave absent when not printed; do not invent a date."
+      },
+      "totalAmount": {
+        "type": "number",
+        "method": "extract",
+        "description": "Final total paid, including taxes and tips, in the receipt currency."
+      },
+      "currency": {
+        "type": "string",
+        "method": "extract",
+        "description": "Three-letter ISO 4217 currency code when identifiable from the receipt."
+      },
+      "lineItems": {
+        "type": "array",
+        "method": "generate",
+        "description": "Purchased items or services, excluding duplicate subtotal and grand-total rows.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string",
+              "method": "extract",
+              "description": "Description of the purchased item or service."
+            },
+            "category": {
+              "type": "string",
+              "method": "generate",
+              "description": "Item category: food, drink, hotel, flight, ground transport, or other."
+            },
+            "price": {
+              "type": "number",
+              "method": "extract",
+              "description": "Price paid for this receipt line item, in the receipt currency."
+            },
+            "quantity": {
+              "type": "number",
+              "method": "extract",
+              "description": "Quantity purchased, when stated on the receipt."
+            }
+          }
+        }
+      },
+      "notes": {
+        "type": "string",
+        "method": "generate",
+        "description": "Relevant receipt details or extraction uncertainties. Do not invent identifiers, dates, timestamps or image URLs."
+      }
+    }
+  }
 }

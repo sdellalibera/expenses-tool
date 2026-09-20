@@ -1,6 +1,6 @@
 using System.ComponentModel;
 
-namespace ExpensesMcpServer.Models;
+namespace Expenses.Data.Models;
 
 /// <summary>
 /// The persisted transcript of one chat between a user and the expenses agent.
@@ -36,6 +36,9 @@ public sealed record ConversationMessage
 
     [Description("Text content of the message.")]
     public string Text { get; set; } = string.Empty;
+
+    [Description("Receipt references and extracted fields replayed to the agent, separate from the displayed message.")]
+    public string? ReceiptContext { get; set; }
 
     [Description("Names of the tools invoked while producing this message.")]
     public IReadOnlyList<string> ToolCalls { get; set; } = [];

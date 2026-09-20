@@ -1,6 +1,7 @@
 //Packages
 #:package Aspire.Hosting.AppHost@13.5.2
 #:package Aspire.Hosting.Azure.CosmosDB@13.5.2
+#:package Aspire.Hosting.Azure.Storage@13.5.2
 #:package Aspire.Hosting.Foundry@13.5.2-preview.1.26421.6
 #:package Aspire.Hosting.JavaScript@13.5.2
 #:package Aspire.Hosting.Python@13.5.2
@@ -14,6 +15,7 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Foundry;
+using Azure.Provisioning.Storage;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
@@ -59,12 +61,40 @@ database.AddContainer("expense-records", "/userId", ExpensesContainer);
 database.AddContainer(ConversationsContainer, "/userId");
 
 // ---------------------------------------------------------------------------
-// MCP server (C#): the only component that talks to Cosmos DB. It exposes the
-// record CRUD as MCP tools on /mcp.
+// Private receipt images, persisted locally by Azurite and in Azure Blob Storage
+// when published. Both services receive the blob endpoint through WithReference.
+// ---------------------------------------------------------------------------
+var storage = builder.AddAzureStorage("receipt-storage")
+    .RunAsEmulator(emulator => emulator.WithDataVolume().WithLifetime(ContainerLifetime.Persistent))
+    .ConfigureInfrastructure(infrastructure =>
+    {
+        var account = infrastructure.GetProvisionableResources().OfType<StorageAccount>().Single();
+        account.AllowBlobPublicAccess = false;
+    });
+var receiptImages = storage.AddBlobContainer("receipt-images");
+
+// ---------------------------------------------------------------------------
+// MCP server (C#): record mutations and receipt management tools on /mcp.
 // ---------------------------------------------------------------------------
 var mcpServer = builder.AddProject("mcp-server", "../mcp-server/mcp-server.csproj")
     .WithReference(cosmos)
     .WaitFor(cosmos)
+    .WithReference(receiptImages)
+    .WaitFor(receiptImages)
+    .WithEnvironment("Cosmos__DatabaseName", DatabaseName)
+    .WithEnvironment("Cosmos__TripsContainer", TripsContainer)
+    .WithEnvironment("Cosmos__ExpensesContainer", ExpensesContainer)
+    .WithEnvironment("Cosmos__ConversationsContainer", ConversationsContainer)
+    .WithHttpHealthCheck("/health");
+
+// Direct, read-only database access for the frontend; no agent or model needed.
+var recordsApi = builder.AddProject("expenses-api", "../expenses-api/expenses-api.csproj")
+    .WithReference(cosmos)
+    .WithReference(receiptImages)
+    .WithRoleAssignments(storage, StorageBuiltInRole.StorageBlobDataReader)
+    .WaitFor(cosmos)
+    .WaitFor(receiptImages)
+    .WaitFor(mcpServer) // The MCP startup initializers create the shared containers.
     .WithEnvironment("Cosmos__DatabaseName", DatabaseName)
     .WithEnvironment("Cosmos__TripsContainer", TripsContainer)
     .WithEnvironment("Cosmos__ExpensesContainer", ExpensesContainer)
@@ -80,13 +110,11 @@ var expensesAgent = builder.AddPythonApp(
         appDirectory: "../python-agent",
         scriptPath: "expenses_agent/main.py")
     .WithReference(chatModel).WaitFor(chatModel)
-    .WaitFor(miniModel)
-    .WaitFor(embeddingModel)
+    .WithReference(miniModel).WaitFor(miniModel)
+    .WithReference(embeddingModel).WaitFor(embeddingModel)
     .WithReference(mcpServer).WaitFor(mcpServer)
     // The durable-memory provider (Agent Memory Toolkit) reads and writes its own
     // Cosmos containers directly; trips and expenses still go through the MCP server.
-    .WithReference(cosmos).WaitFor(cosmos)
-    .WithEnvironment("COSMOS_DATABASE", DatabaseName)
     .WithEnvironment("ENABLE_COSMOS_MEMORY", builder.ExecutionContext.IsRunMode ? "false" : "true")
     .WithEnvironment("MEMORY_CHAT_MODEL", "gpt5mini")
     .WithEnvironment("MEMORY_EMBEDDING_MODEL", "TextEmbedding3Large")
@@ -104,17 +132,22 @@ var expensesAgent = builder.AddPythonApp(
 
 if (builder.ExecutionContext.IsPublishMode)
 {
+    expensesAgent.WithReference(cosmos)
+        .WaitFor(cosmos)
+        .WithEnvironment("COSMOS_DATABASE", DatabaseName);
+    expensesAgent.PublishAsDockerFile(container =>
+        container.WithDockerfile("..", "python-agent/Dockerfile"));
     expensesAgent.AsHostedAgent(foundryProject);
 }
 
 // ---------------------------------------------------------------------------
-// React frontend. The Vite dev server proxies /chat, /api and /health to the
-// agent, so the app is same-origin and works from a phone on the same network.
+// Vite routes /api to the read API and /chat, /commands, /health to the agent.
 // ---------------------------------------------------------------------------
 builder.AddViteApp("frontend", "../frontend")
     .WithNpm()
     .WithReference(expensesAgent)
-    .WaitFor(expensesAgent)
+    .WithReference(recordsApi)
+    .WaitFor(recordsApi)
     .WithExternalHttpEndpoints();
 
 builder.Build().Run();

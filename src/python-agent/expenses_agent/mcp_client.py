@@ -5,7 +5,7 @@ the MCP server — the agent never opens a database connection for trips or
 expenses. This module wraps the raw MCP ``call_tool`` plumbing in small typed
 helpers used by:
 
-* the REST endpoints the React frontend calls (trips / expenses / conversations),
+* deterministic receipt uploads and explicit delete commands,
 * the Cosmos backed conversation history provider.
 
 The agent's *own* tool calling uses :class:`agent_framework.MCPStreamableHTTPTool`
@@ -18,6 +18,7 @@ stateless mode, so this costs one extra round trip and avoids holding an
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from typing import Any
@@ -105,7 +106,12 @@ class ExpensesMcpClient:
                 result = await session.call_tool(name, arguments)
 
             if result.isError:
-                message = _result_text(result) or f"MCP tool '{name}' failed"
+                # A failed upload must never echo its base64 payload in logs or errors.
+                message = (
+                    "Receipt upload failed. Check the image format, size and storage configuration."
+                    if name == "upload_receipt_image"
+                    else _result_text(result) or f"MCP tool '{name}' failed"
+                )
                 span.set_attribute("mcp.tool.error", message)
                 logger.error("MCP tool '%s' returned an error: %s", name, message)
                 raise McpToolError(message)
@@ -137,6 +143,35 @@ class ExpensesMcpClient:
 
     async def delete_expense(self, user_id: str, expense_id: str) -> bool:
         return bool(await self.call("delete_expense", {"userId": user_id, "expenseId": expense_id}))
+
+    # ---- Receipt images ---------------------------------------------
+
+    async def upload_receipt_image(
+        self,
+        user_id: str,
+        conversation_id: str,
+        filename: str,
+        content_type: str,
+        data: bytes,
+    ) -> dict[str, Any]:
+        result = await self.call(
+            "upload_receipt_image",
+            {
+                "userId": user_id,
+                "conversationId": conversation_id,
+                "fileName": filename,
+                "contentType": content_type,
+                "base64Data": base64.b64encode(data).decode("ascii"),
+            },
+        )
+        if (
+            not isinstance(result, dict)
+            or not result.get("blobName")
+            or not result.get("photoUrl")
+            or result.get("conversationId") != conversation_id
+        ):
+            raise McpToolError("Receipt upload did not return a valid stored image reference.")
+        return result
 
     # ---- Conversations ----------------------------------------------
 

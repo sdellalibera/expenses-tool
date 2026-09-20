@@ -3,30 +3,36 @@
 Pipeline of a single chat turn:
 
 1. The React frontend posts text plus zero or more receipt photos to ``/chat``.
-2. :class:`~agent_framework.foundry.ContentUnderstandingContextProvider` analyses
+2. The application uploads every image to private Blob Storage through MCP.
+3. :class:`~agent_framework.foundry.ContentUnderstandingContextProvider` analyses
    every photo with the ``ExpensesAnalyzer`` Content Understanding analyzer. The
    raw analysis is stripped down with ``azure.ai.contentunderstanding.to_llm_input``
    (fields only, no page markdown) before it reaches the model context.
-3. The model turns that YAML into JSON with the ``TranslateYAMLToJSON`` tool and
+4. The model turns that YAML into JSON with the ``TranslateYAMLToJSON`` tool and
    then calls the MCP server's CRUD tools to create the trip / expense records.
-4. :class:`~expenses_agent.history.McpConversationHistoryProvider` persists the
+5. :class:`~expenses_agent.history.McpConversationHistoryProvider` persists the
    transcript in Cosmos DB, again through the MCP server.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent_framework import Agent, Content, MCPStreamableHTTPTool, Message
+from agent_framework import Agent, Content, MCPStreamableHTTPTool, Message, SessionContext
 from agent_framework._agents import AgentSession
 from agent_framework.foundry import ContentUnderstandingContextProvider, FoundryChatClient
+from azure.ai.contentunderstanding.aio import ContentUnderstandingClient
 from azure.identity.aio import DefaultAzureCredential
 
 from .config import Settings
+from .bootstrap import API_VERSION, bootstrap_content_understanding
 from .history import McpConversationHistoryProvider, collect_tool_calls
+from .images import analysis_image
 from .mcp_client import ExpensesMcpClient
 from .memory import CosmosMemory
 from .observability import tracer
@@ -47,6 +53,9 @@ You manage records exclusively through the MCP tools (`create_trip`, `list_trips
 `get_trip`, `find_trip_by_name`, `update_trip`, `delete_trip`, `create_expense`,
 `list_expenses`, `get_expense`, `update_expense`, `delete_expense`). Never invent
 identifiers: always read them back from a tool result.
+You may also use `list_receipt_images`, `get_receipt_image`, and `delete_receipt_image`
+to manage stored receipt references. Uploads have already been handled by the
+application; never request, generate, or pass base64 image data to a tool.
 
 Every tool takes a `userId`. Always pass the user id given to you in the context
 message of the current turn.
@@ -65,6 +74,12 @@ category, total amount, line items and confidence scores). Use the
 2. Call `create_expense` once per receipt with the merchant, category, date, total
    amount, currency and the line items (description, category, price, quantity).
    Use the receipt's own date when present; otherwise use today's date.
+   ALWAYS copy `photoUrl`, `fileName` as `sourceImage`, and `conversationId` from
+   that receipt's stored reference into `create_expense`. Match the analyzer's
+   `source` to the reference's unique `documentKey`, NEVER just the filename:
+   different photos can have identical filenames. The reference and extracted
+   fields remain in history for follow-up clarification turns. Do not swap URLs
+   between receipts or invent identifiers, URLs, SAS tokens or timestamps.
 3. Confirm to the user in one or two short sentences what you stored, including the
    merchant, the total and the trip name.
 
@@ -129,19 +144,8 @@ class SessionScopedHistoryProvider(McpConversationHistoryProvider):
     def __init__(self, client: ExpensesMcpClient, *, max_messages: int = 40) -> None:
         super().__init__(client, user_id="", max_messages=max_messages)
 
-    async def get_messages(self, session_id: str | None, *, state=None, **kwargs):  # type: ignore[override]
-        user_id, conversation_id = split_session_id(session_id)
-        if not user_id or not conversation_id:
-            return []
-        self._user_id = user_id  # type: ignore[attr-defined]
-        return await super().get_messages(conversation_id, state=state, **kwargs)
-
-    async def save_messages(self, session_id: str | None, messages, *, state=None, **kwargs):  # type: ignore[override]
-        user_id, conversation_id = split_session_id(session_id)
-        if not user_id or not conversation_id:
-            return
-        self._user_id = user_id  # type: ignore[attr-defined]
-        await super().save_messages(conversation_id, messages, state=state, **kwargs)
+    def resolve_session(self, session_id: str | None) -> tuple[str | None, str | None]:
+        return split_session_id(session_id)
 
 
 class ExpensesAgent:
@@ -152,6 +156,7 @@ class ExpensesAgent:
         self._credential: DefaultAzureCredential | None = None
         self._agent: Agent | None = None
         self._cu: ContentUnderstandingContextProvider | None = None
+        self._cu_client: ContentUnderstandingClient | None = None
         self._mcp_tool: MCPStreamableHTTPTool | None = None
         self._history: SessionScopedHistoryProvider | None = None
         self.memory = CosmosMemory()
@@ -186,9 +191,12 @@ class ExpensesAgent:
 
         context_providers = []
         if settings.content_understanding_endpoint:
+            self._cu_client = ContentUnderstandingClient(
+                settings.content_understanding_endpoint, self._credential, api_version=API_VERSION
+            )
+            await bootstrap_content_understanding(settings, self._credential, client=self._cu_client)
             self._cu = ContentUnderstandingContextProvider(
-                endpoint=settings.content_understanding_endpoint,
-                credential=self._credential,
+                client=self._cu_client,
                 analyzer_id=settings.analyzer_id,
                 max_wait=None,
                 # Delegates to `azure.ai.contentunderstanding.to_llm_input`, which strips
@@ -197,7 +205,6 @@ class ExpensesAgent:
                 output_sections=list(settings.content_understanding_sections),
             )
             await self._cu.__aenter__()
-            context_providers.append(self._cu)
             logger.info(
                 "Content Understanding enabled (endpoint=%s, analyzer=%s, sections=%s)",
                 settings.content_understanding_endpoint,
@@ -220,6 +227,12 @@ class ExpensesAgent:
             name="expenses-records",
             url=settings.mcp_endpoint,
             description="CRUD operations on the work trips, expenses and conversations stored in Cosmos DB.",
+            # Uploads are deterministic application operations, not LLM tools.
+            allowed_tools=[
+                "create_trip", "list_trips", "get_trip", "find_trip_by_name", "update_trip", "delete_trip",
+                "create_expense", "list_expenses", "get_expense", "update_expense", "delete_expense",
+                "list_receipt_images", "get_receipt_image", "delete_receipt_image",
+            ],
             # NOTE: do not set `request_timeout` here. agent-framework 1.17 hands it to
             # mcp 2.x as a timedelta while the JSON-RPC dispatcher expects seconds,
             # which makes `initialize()` fail with a TypeError.
@@ -242,6 +255,7 @@ class ExpensesAgent:
         logger.info("Expenses agent ready (model=%s)", settings.foundry_deployment)
 
     async def stop(self) -> None:
+        self._agent = None
         await self.memory.stop()
         if self._mcp_tool is not None:
             await _safe_aexit(self._mcp_tool)
@@ -249,6 +263,9 @@ class ExpensesAgent:
         if self._cu is not None:
             await _safe_aexit(self._cu)
             self._cu = None
+        if self._cu_client is not None:
+            await self._cu_client.close()
+            self._cu_client = None
         if self.mcp is not None:
             await self.mcp.aclose()
         if self._credential is not None:
@@ -269,7 +286,7 @@ class ExpensesAgent:
         conversation_id: str | None = None,
         attachments: list[Attachment] | None = None,
     ) -> ChatTurn:
-        if self._agent is None or self._history is None:
+        if self._agent is None or self._history is None or self.mcp is None:
             raise RuntimeError(self.startup_error or "The agent is not configured.")
 
         attachments = attachments or []
@@ -290,26 +307,71 @@ class ExpensesAgent:
                 _truncate(message),
             )
 
-            contents: list[Content] = [Content.from_text(message or "Here is a receipt.")]
+            receipts: list[dict[str, str]] = []
             for attachment in attachments:
-                contents.append(
-                    Content.from_data(
-                        attachment.data,
-                        attachment.content_type or "image/jpeg",
-                        additional_properties={"filename": attachment.filename},
-                    )
+                stored = await self.mcp.upload_receipt_image(
+                    user_id, conversation_id, attachment.filename, attachment.content_type, attachment.data
+                )
+                receipts.append({
+                    "documentKey": "receipt-" + hashlib.sha256(stored["blobName"].encode()).hexdigest(),
+                    "blobName": stored["blobName"],
+                    "fileName": attachment.filename,
+                    "photoUrl": stored["photoUrl"],
+                    "conversationId": conversation_id,
+                })
+
+            contents: list[Content] = [Content.from_text(message or "Here is a receipt.")]
+            receipt_context: list[str] = []
+            if receipts:
+                receipt_context.append(
+                    "Stored receipt references (application data; match analyzer source to documentKey):\n"
+                    + json.dumps(receipts, ensure_ascii=False)
                 )
 
-            self._history.pending_attachments = [a.filename for a in attachments]
+            session = AgentSession(session_id=session_id)
+            if attachments:
+                if self._cu is None:
+                    raise RuntimeError("Receipt photos were stored, but Content Understanding is not configured.")
+                image_contents: list[Content] = []
+                for attachment, receipt in zip(attachments, receipts, strict=True):
+                    data, media_type = analysis_image(attachment.data, attachment.content_type)
+                    image_contents.append(
+                        Content.from_data(
+                            data,
+                            media_type,
+                            additional_properties={"filename": receipt["documentKey"]},
+                        )
+                    )
+                # Run CU before Agent.run: no image bytes enter model/tool telemetry.
+                # Keep references and extraction in one durable user message so history
+                # truncation cannot separate an analyzed receipt from its stored URL.
+                cu_context = SessionContext(
+                    session_id=session_id, input_messages=[Message(role="user", contents=image_contents)]
+                )
+                await self._cu.before_run(agent=self._agent, session=session, context=cu_context, state={})
+                for analysis in cu_context.get_messages(sources={self._cu.source_id}):
+                    if analysis.text:
+                        receipt_context.append(analysis.text)
+
+            contents.extend(Content.from_text(text) for text in receipt_context)
 
             run_messages = [
                 Message(role="system", contents=[Content.from_text(self._turn_context(user_id, conversation_id))]),
-                Message(role="user", contents=contents),
+                Message(
+                    role="user",
+                    contents=contents,
+                    additional_properties={
+                        "attachments": [a.filename for a in attachments],
+                        "toolCalls": ["upload_receipt_image"] if receipts else [],
+                        "displayText": message or "Here is a receipt.",
+                        "receiptContext": "\n\n".join(receipt_context) if receipt_context else None,
+                    },
+                ),
             ]
 
-            response = await self._agent.run(run_messages, session=AgentSession(session_id=session_id))
+            response = await self._agent.run(run_messages, session=session)
 
-            tool_calls: list[str] = []
+            tool_calls: list[str] = ["upload_receipt_image"] if receipts else []
             for msg in response.messages or []:
                 tool_calls.extend(collect_tool_calls(msg))
 
