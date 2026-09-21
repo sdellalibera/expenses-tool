@@ -23,6 +23,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+import httpx2
 from agent_framework import Agent, Content, MCPStreamableHTTPTool, Message, SessionContext
 from agent_framework._agents import AgentSession
 from agent_framework.foundry import ContentUnderstandingContextProvider, FoundryChatClient
@@ -34,7 +35,7 @@ from .history import McpConversationHistoryProvider, collect_tool_calls
 from .images import analysis_image
 from .mcp_client import ExpensesMcpClient
 from .memory import CosmosMemory
-from .observability import ContentUnderstandingTelemetryPolicy, ModelHttpClient, tracer
+from .observability import ContentUnderstandingTelemetryPolicy, tracer
 from .tools.parser_tool import receipt_json
 
 logger = logging.getLogger(__name__)
@@ -248,7 +249,7 @@ class ExpensesAgent:
         )
         original_client = self._chat_client.client
         self._chat_client.client = original_client.with_options(
-            http_client=ModelHttpClient(timeout=120), max_retries=settings.model_max_retries,
+            http_client=httpx2.AsyncClient(timeout=120), max_retries=settings.model_max_retries,
         )
         await original_client.close()
         self._agent = Agent(

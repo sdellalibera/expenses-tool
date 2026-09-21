@@ -301,10 +301,10 @@ Every maintained file under [src/python-agent](src/python-agent) has a specific 
 | [memory.py](src/python-agent/expenses_agent/memory.py) | Optional semantic memory across conversations. The Agent Memory Toolkit owns separate Cosmos containers and connects directly to them, not through MCP. Failures disable this layer without disabling transcript history. |
 | [config.py](src/python-agent/expenses_agent/config.py) | Resolves settings from environment variables and Aspire service discovery/connection strings. Supplies model, MCP, memory, telemetry and server options, plus a non-secret configuration summary. |
 | [images.py](src/python-agent/expenses_agent/images.py) | Uses Pillow to verify image type/integrity and guard against oversized decoded images. Converts GIF/WebP to PNG for analysis only; uploaded originals remain unchanged in storage. |
-| [observability.py](src/python-agent/expenses_agent/observability.py) | Configures OpenTelemetry, instruments FastAPI/httpx, and adds httpx2 model-attempt spans, Content Understanding response events, usage counters and allowlisted rate-limit headers. |
+| [observability.py](src/python-agent/expenses_agent/observability.py) | Configures OpenTelemetry and FastAPI/httpx instrumentation, omits ASGI internal spans, and adds Content Understanding response events, usage attributes and allowlisted request/retry headers. |
 | [__init__.py](src/python-agent/expenses_agent/__init__.py) | Declares the Python package and its version. |
-| [tools/parser_tool.py](src/python-agent/expenses_agent/tools/parser_tool.py) | Deterministic YAML helpers, including receipt source/fields validation and compact JSON conversion. Not exposed as a model tool. |
-| [tools/__init__.py](src/python-agent/expenses_agent/tools/__init__.py) | Exports local parser helper aliases. Business CRUD tools live in the C# MCP server. |
+| [tools/parser_tool.py](src/python-agent/expenses_agent/tools/parser_tool.py) | Validates receipt source/fields and converts the context provider's YAML front matter to compact JSON. Called directly by the agent, not exposed as a model tool. |
+| [tools/__init__.py](src/python-agent/expenses_agent/tools/__init__.py) | Namespace for local receipt parsing helpers. Business CRUD tools live in the C# MCP server. |
 | [pyproject.toml](src/python-agent/pyproject.toml) | Declares Python compatibility, dependencies, Hatch packaging, prerelease support for uv and the agent command-line entry point. |
 | [Dockerfile](src/python-agent/Dockerfile) | Packages the agent using `src` as its build context, installs dependencies and starts the agent as a non-root user. Analyzer provisioning is separate. |
 
@@ -479,13 +479,17 @@ uses HTTP/protobuf via the endpoint injected by the AppHost.
 | Record CRUD | `records.<entity>.<operation>` spans from `Expenses.Data` in MCP/read API plus a log line with the Cosmos request charge |
 | Receipt analysis stage | `receipt.analyze` with checkpoint-hit status; includes preparation, CU analysis, validation and saving extracted JSON, or returns cached JSON |
 | Content Understanding responses | `receipt.http` events on the active span, with HTTP status and allowlisted request/retry headers; `receipt.usage.*` when the service returns usage |
-| Model HTTP attempts | `model.http` spans for httpx2 requests, including retries, status, allowlisted request IDs/rate-limit headers and `model.usage.*` on successful responses |
-| HTTP in/out | FastAPI + httpx instrumentation (Python), ASP.NET Core + HttpClient instrumentation (C#) |
+| Model calls | Agent Framework model spans with timing, errors and `gen_ai.usage.*`; no additional custom HTTP-attempt spans |
+| HTTP in/out | FastAPI request spans without internal ASGI send/receive spans, httpx instrumentation (Python), ASP.NET Core + HttpClient instrumentation (C#) |
+
+HTTP instrumentation remains enabled to connect Python and .NET operations in
+the same distributed trace. Application spans for chat, receipt analysis,
+conversation history, tool calls and record operations remain visible.
 
 Sensitive-data capture (prompts and completions) is on by default for the demo.
-The custom HTTP telemetry does not record request/response bodies, authorization
-headers or cookies. Model HTTP usage duplicates the same successful call represented
-by the framework's `gen_ai.usage.*`; do not sum both when calculating totals.
+The custom Content Understanding response telemetry does not record request/response
+bodies, authorization headers or cookies. Use the framework's `gen_ai.usage.*`
+attributes for chat-model token usage.
 
 ### Find CU calls in Aspire
 

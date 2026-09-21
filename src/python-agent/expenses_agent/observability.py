@@ -15,7 +15,6 @@ import sys
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
-import httpx2
 from azure.core.pipeline.policies import SansIOHTTPPolicy
 from opentelemetry import trace
 
@@ -65,7 +64,11 @@ def instrument_app(app) -> None:
     try:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-        FastAPIInstrumentor.instrument_app(app, excluded_urls="health,alive")
+        FastAPIInstrumentor.instrument_app(
+            app,
+            excluded_urls="health,alive",
+            exclude_spans=["send", "receive"],
+        )
     except Exception:  # pragma: no cover
         logging.getLogger(__name__).warning("Could not instrument FastAPI", exc_info=True)
 
@@ -102,44 +105,6 @@ class ContentUnderstandingTelemetryPolicy(SansIOHTTPPolicy):
                     span.set_attribute("receipt.usage." + name, count)
         except Exception:
             pass
-
-
-class ModelHttpClient(httpx2.AsyncClient):
-    async def send(self, request, **kwargs):
-        with tracer().start_as_current_span("model.http", kind=trace.SpanKind.CLIENT) as span:
-            span.set_attribute("server.address", request.url.host)
-            span.set_attribute("http.request.method", request.method)
-            span.set_attribute("url.path", request.url.path)
-            retry_count = request.headers.get("x-stainless-retry-count")
-            if retry_count is not None:
-                span.set_attribute("model.retry_count", retry_count)
-            response = await super().send(request, **kwargs)
-            span.set_attribute("http.response.status_code", response.status_code)
-            for header in (
-                "x-request-id", "apim-request-id", "x-ms-request-id", "retry-after", "retry-after-ms",
-                "x-ratelimit-limit-tokens", "x-ratelimit-limit-requests",
-                "x-ratelimit-remaining-tokens", "x-ratelimit-remaining-requests",
-                "x-ratelimit-reset-tokens", "x-ratelimit-reset-requests",
-            ):
-                if value := response.headers.get(header):
-                    span.set_attribute("http.response.header." + header, value)
-            if response.status_code >= 400:
-                span.set_status(trace.Status(trace.StatusCode.ERROR, f"HTTP {response.status_code}"))
-            if "application/json" in response.headers.get("content-type", ""):
-                await response.aread()
-                try:
-                    payload = response.json()
-                    usage = payload.get("usage") or {}
-                    for name in ("input_tokens", "output_tokens", "total_tokens"):
-                        if isinstance(usage.get(name), int):
-                            span.set_attribute("model.usage." + name, usage[name])
-                    for group, name in (("input_tokens_details", "cached_tokens"), ("output_tokens_details", "reasoning_tokens")):
-                        count = (usage.get(group) or {}).get(name)
-                        if isinstance(count, int):
-                            span.set_attribute("model.usage." + name, count)
-                except (ValueError, AttributeError, TypeError):
-                    pass
-            return response
 
 
 def retry_after_seconds(error: BaseException) -> int | None:
