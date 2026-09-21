@@ -9,9 +9,14 @@ its chat client and its tool calls; we additionally instrument FastAPI and httpx
 from __future__ import annotations
 
 import logging
+import math
 import os
 import sys
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
+import httpx2
+from azure.core.pipeline.policies import SansIOHTTPPolicy
 from opentelemetry import trace
 
 _TRACER_NAME = "expenses-agent"
@@ -36,6 +41,8 @@ def configure(service_name: str = "expenses-agent", *, enable_sensitive_data: bo
     logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
     logging.getLogger("azure.identity").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    # MCP requests may contain deterministic upload payloads, never log their bodies.
+    logging.getLogger("mcp").setLevel(logging.WARNING)
 
     os.environ.setdefault("OTEL_SERVICE_NAME", service_name)
 
@@ -73,3 +80,90 @@ def instrument_app(app) -> None:
 def tracer() -> trace.Tracer:
     """Tracer used for the agent's own spans (chat turns, MCP calls, CU calls)."""
     return trace.get_tracer(_TRACER_NAME)
+
+
+class ContentUnderstandingTelemetryPolicy(SansIOHTTPPolicy):
+    def on_response(self, request, response):
+        span = trace.get_current_span()
+        if not span.is_recording():
+            return
+        http_response = response.http_response
+        attributes = {"http.response.status_code": http_response.status_code}
+        for header in ("x-ms-request-id", "apim-request-id", "retry-after", "retry-after-ms"):
+            if value := http_response.headers.get(header):
+                attributes["http.response.header." + header] = value
+        span.add_event("receipt.http", attributes)
+        try:
+            payload = http_response.json()
+            result = payload.get("result") or payload
+            usage = result.get("usage") or {}
+            for name, count in (usage.get("tokens") or {}).items():
+                if isinstance(count, (int, float)):
+                    span.set_attribute("receipt.usage." + name, count)
+        except Exception:
+            pass
+
+
+class ModelHttpClient(httpx2.AsyncClient):
+    async def send(self, request, **kwargs):
+        with tracer().start_as_current_span("model.http", kind=trace.SpanKind.CLIENT) as span:
+            span.set_attribute("server.address", request.url.host)
+            span.set_attribute("http.request.method", request.method)
+            span.set_attribute("url.path", request.url.path)
+            retry_count = request.headers.get("x-stainless-retry-count")
+            if retry_count is not None:
+                span.set_attribute("model.retry_count", retry_count)
+            response = await super().send(request, **kwargs)
+            span.set_attribute("http.response.status_code", response.status_code)
+            for header in (
+                "x-request-id", "apim-request-id", "x-ms-request-id", "retry-after", "retry-after-ms",
+                "x-ratelimit-limit-tokens", "x-ratelimit-limit-requests",
+                "x-ratelimit-remaining-tokens", "x-ratelimit-remaining-requests",
+                "x-ratelimit-reset-tokens", "x-ratelimit-reset-requests",
+            ):
+                if value := response.headers.get(header):
+                    span.set_attribute("http.response.header." + header, value)
+            if response.status_code >= 400:
+                span.set_status(trace.Status(trace.StatusCode.ERROR, f"HTTP {response.status_code}"))
+            if "application/json" in response.headers.get("content-type", ""):
+                await response.aread()
+                try:
+                    payload = response.json()
+                    usage = payload.get("usage") or {}
+                    for name in ("input_tokens", "output_tokens", "total_tokens"):
+                        if isinstance(usage.get(name), int):
+                            span.set_attribute("model.usage." + name, usage[name])
+                    for group, name in (("input_tokens_details", "cached_tokens"), ("output_tokens_details", "reasoning_tokens")):
+                        count = (usage.get(group) or {}).get(name)
+                        if isinstance(count, int):
+                            span.set_attribute("model.usage." + name, count)
+                except (ValueError, AttributeError, TypeError):
+                    pass
+            return response
+
+
+def retry_after_seconds(error: BaseException) -> int | None:
+    pending = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        headers = getattr(getattr(current, "response", None), "headers", {})
+        for name, divisor in (("retry-after-ms", 1000), ("retry-after", 1)):
+            value = headers.get(name)
+            if value is None:
+                continue
+            try:
+                seconds = float(value) / divisor
+            except ValueError:
+                try:
+                    seconds = (parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds()
+                except (ValueError, TypeError, OverflowError):
+                    continue
+            if math.isfinite(seconds):
+                return max(1, math.ceil(seconds))
+        pending.extend(item for item in current.args if isinstance(item, BaseException))
+        pending.extend(item for item in (current.__cause__, current.__context__) if item is not None)
+    return None

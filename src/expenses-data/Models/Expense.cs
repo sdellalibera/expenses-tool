@@ -1,6 +1,6 @@
 using System.ComponentModel;
 
-namespace ExpensesMcpServer.Models;
+namespace Expenses.Data.Models;
 
 /// <summary>
 /// A single expense (one receipt) that always belongs to a <see cref="Trip"/>.
@@ -40,6 +40,9 @@ public sealed record Expense
 
     [Description("Name of the uploaded receipt image the expense was extracted from.")]
     public string? SourceImage { get; set; }
+
+    [Description("Durable URL of the private receipt image in Blob Storage, without a SAS token.")]
+    public string? PhotoUrl { get; set; }
 
     [Description("Identifier of the chat conversation the expense was created in.")]
     public string? ConversationId { get; set; }

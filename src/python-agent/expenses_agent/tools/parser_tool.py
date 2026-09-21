@@ -1,14 +1,8 @@
-from agent_framework import tool
-from typing import Annotated
-from pydantic import Field
 import yaml
 import json
 
 
-@tool(name="TranslateYAMLToJSON", description="helps an agent translate yaml content into json object")
-def translateYAMLtoJSON(
-    yamlString: Annotated[str, Field(description="yaml body content that has to be translated into a JSON object")]
-) -> str:
+def translateYAMLtoJSON(yamlString: str) -> str:
     try:
         parsed_yaml = yaml.safe_load(yamlString)
     except yaml.YAMLError as exc:
@@ -22,3 +16,20 @@ def translateYAMLtoJSON(
 
 # Snake-case alias used by the newer modules.
 translate_yaml_to_json = translateYAMLtoJSON
+
+
+def receipt_json(rendered: str, source: str) -> str:
+    lines = rendered.strip().splitlines()
+    if not lines or lines[0] != "---":
+        raise ValueError("Receipt analysis is missing structured fields.")
+    try:
+        end = lines.index("---", 1)
+        payload = yaml.safe_load("\n".join(lines[1:end]))
+    except (ValueError, yaml.YAMLError) as exc:
+        raise ValueError("Receipt analysis contains invalid structured fields.") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("fields"), dict) or not payload["fields"]:
+        raise ValueError("Receipt analysis returned no usable fields.")
+    metadata = payload.get("customMetadata") or {}
+    if not isinstance(metadata, dict) or metadata.get("source") != source:
+        raise ValueError("Receipt analysis source does not match the uploaded receipt.")
+    return json.dumps({"source": source, "fields": payload["fields"]}, ensure_ascii=False, separators=(",", ":"), default=str)

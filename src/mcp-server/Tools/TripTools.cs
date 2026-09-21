@@ -1,6 +1,6 @@
 using System.ComponentModel;
-using ExpensesMcpServer.Data;
-using ExpensesMcpServer.Models;
+using Expenses.Data;
+using Expenses.Data.Models;
 using ModelContextProtocol.Server;
 
 namespace ExpensesMcpServer.Tools;
@@ -53,22 +53,7 @@ public sealed class TripTools(IExpensesRepository repository, ILogger<TripTools>
 
         logger.LogInformation("MCP tool list_trips invoked by user {UserId}", userId);
 
-        var trips = await repository.ListTripsAsync(userId, status, cancellationToken);
-        var expenses = await repository.ListExpensesAsync(userId, cancellationToken: cancellationToken);
-
-        return
-        [
-            .. trips.Select(trip =>
-            {
-                var tripExpenses = expenses.Where(e => e.TripId == trip.Id).ToList();
-                return new TripSummary
-                {
-                    Trip = trip,
-                    ExpenseCount = tripExpenses.Count,
-                    TotalAmount = tripExpenses.Sum(e => e.TotalAmount),
-                };
-            })
-        ];
+        return await TripQueries.ListSummariesAsync(repository, userId, status, cancellationToken);
     }
 
     // No output schema: this tool returns null when the trip does not exist, and an
@@ -85,20 +70,7 @@ public sealed class TripTools(IExpensesRepository repository, ILogger<TripTools>
 
         logger.LogInformation("MCP tool get_trip invoked by user {UserId} for trip {TripId}", userId, tripId);
 
-        var trip = await repository.GetTripAsync(userId, tripId, cancellationToken);
-        if (trip is null)
-        {
-            return null;
-        }
-
-        var expenses = await repository.ListExpensesAsync(userId, tripId, cancellationToken);
-
-        return new TripSummary
-        {
-            Trip = trip,
-            ExpenseCount = expenses.Count,
-            TotalAmount = expenses.Sum(e => e.TotalAmount),
-        };
+        return await TripQueries.GetSummaryAsync(repository, userId, tripId, cancellationToken);
     }
 
     [McpServerTool(Name = "find_trip_by_name", UseStructuredContent = true)]

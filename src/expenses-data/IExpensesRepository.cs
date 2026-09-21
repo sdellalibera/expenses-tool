@@ -1,20 +1,14 @@
-using ExpensesMcpServer.Models;
+using Expenses.Data.Models;
 
-namespace ExpensesMcpServer.Data;
+namespace Expenses.Data;
 
 /// <summary>
-/// Every read and write the MCP server performs against Cosmos DB.
-/// The interface exists so the MCP tools can be unit tested against
-/// <see cref="InMemoryExpensesRepository"/> without a live database.
+/// Record mutations are exposed only through the MCP server.
 /// </summary>
-public interface IExpensesRepository
+public interface IExpensesRepository : IExpensesReader
 {
     // ---- Trips -------------------------------------------------------
     Task<Trip> CreateTripAsync(Trip trip, CancellationToken cancellationToken = default);
-
-    Task<IReadOnlyList<Trip>> ListTripsAsync(string userId, string? status = null, CancellationToken cancellationToken = default);
-
-    Task<Trip?> GetTripAsync(string userId, string tripId, CancellationToken cancellationToken = default);
 
     Task<Trip?> UpdateTripAsync(string userId, string tripId, TripPatch patch, CancellationToken cancellationToken = default);
 
@@ -23,15 +17,14 @@ public interface IExpensesRepository
     // ---- Expenses ----------------------------------------------------
     Task<Expense> CreateExpenseAsync(Expense expense, CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<Expense>> ListExpensesAsync(string userId, string? tripId = null, CancellationToken cancellationToken = default);
-
-    Task<Expense?> GetExpenseAsync(string userId, string expenseId, CancellationToken cancellationToken = default);
-
     Task<Expense?> UpdateExpenseAsync(string userId, string expenseId, ExpensePatch patch, CancellationToken cancellationToken = default);
 
     Task<bool> DeleteExpenseAsync(string userId, string expenseId, CancellationToken cancellationToken = default);
 
     // ---- Conversations ----------------------------------------------
+    Task SaveReceiptCheckpointAsync(string userId, string conversationId, string key,
+        ReceiptCheckpoint checkpoint, CancellationToken cancellationToken = default);
+
     Task<Conversation> AppendConversationMessagesAsync(
         string userId,
         string conversationId,
@@ -39,10 +32,6 @@ public interface IExpensesRepository
         string? title = null,
         string? tripId = null,
         CancellationToken cancellationToken = default);
-
-    Task<Conversation?> GetConversationAsync(string userId, string conversationId, CancellationToken cancellationToken = default);
-
-    Task<IReadOnlyList<ConversationSummary>> ListConversationsAsync(string userId, CancellationToken cancellationToken = default);
 
     Task<bool> DeleteConversationAsync(string userId, string conversationId, CancellationToken cancellationToken = default);
 }
@@ -70,4 +59,6 @@ public sealed record ExpensePatch
     public string? Currency { get; init; }
     public IReadOnlyList<ExpenseLineItem>? LineItems { get; init; }
     public string? Notes { get; init; }
+    public string? SourceImage { get; init; }
+    public string? PhotoUrl { get; init; }
 }

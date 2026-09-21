@@ -1,6 +1,6 @@
 using System.ComponentModel;
 
-namespace ExpensesMcpServer.Models;
+namespace Expenses.Data.Models;
 
 /// <summary>
 /// A work trip that groups together every expense made while travelling.

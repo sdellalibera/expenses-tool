@@ -1,9 +1,11 @@
 //Packages
 #:package Aspire.Hosting.AppHost@13.5.2
 #:package Aspire.Hosting.Azure.CosmosDB@13.5.2
+#:package Aspire.Hosting.Azure.Storage@13.5.2
 #:package Aspire.Hosting.Foundry@13.5.2-preview.1.26421.6
 #:package Aspire.Hosting.JavaScript@13.5.2
 #:package Aspire.Hosting.Python@13.5.2
+#:package CommunityToolkit.Aspire.Hosting.PowerShell@13.5.0
 
 //Sdks
 #:sdk Aspire.AppHost.Sdk@13.5.2
@@ -14,6 +16,9 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Foundry;
+using Azure.Provisioning.Storage;
+using CommunityToolkit.Aspire.Hosting.PowerShell;
+using System.Management.Automation;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
@@ -24,13 +29,14 @@ var builder = DistributedApplication.CreateBuilder(args);
 var foundry = builder.AddFoundry("foundry");
 var foundryProject = foundry.AddProject("expenses");
 
-var chatModel = foundryProject.AddModelDeployment("gpt5", FoundryModel.OpenAI.Gpt5);
-var miniModel = foundryProject.AddModelDeployment("gpt5mini", FoundryModel.OpenAI.Gpt5Mini);
+var chatModel = foundryProject.AddModelDeployment("gpt5-4", FoundryModel.OpenAI.Gpt54);
+var miniModel = foundryProject.AddModelDeployment("gpt5-4-mini", FoundryModel.OpenAI.Gpt54Mini);
 var embeddingModel = foundryProject.AddModelDeployment("TextEmbedding3Large", FoundryModel.OpenAI.TextEmbedding3Large);
 
 // Content Understanding lives on the same AI Services account; its endpoint is
 // supplied as a parameter (`aspire secret set Parameters:contentUnderstandingEndpoint ...`).
 var contentUnderstandingEndpoint = builder.AddParameter("contentUnderstandingEndpoint");
+const string AnalyzerId = "ExpensesAnalyzer";
 
 // ---------------------------------------------------------------------------
 // Cosmos DB: conversation transcripts + every trip and expense record.
@@ -59,12 +65,40 @@ database.AddContainer("expense-records", "/userId", ExpensesContainer);
 database.AddContainer(ConversationsContainer, "/userId");
 
 // ---------------------------------------------------------------------------
-// MCP server (C#): the only component that talks to Cosmos DB. It exposes the
-// record CRUD as MCP tools on /mcp.
+// Private receipt images, persisted locally by Azurite and in Azure Blob Storage
+// when published. Both services receive the blob endpoint through WithReference.
+// ---------------------------------------------------------------------------
+var storage = builder.AddAzureStorage("receipt-storage")
+    .RunAsEmulator(emulator => emulator.WithDataVolume().WithLifetime(ContainerLifetime.Persistent))
+    .ConfigureInfrastructure(infrastructure =>
+    {
+        var account = infrastructure.GetProvisionableResources().OfType<StorageAccount>().Single();
+        account.AllowBlobPublicAccess = false;
+    });
+var receiptImages = storage.AddBlobContainer("receipt-images");
+
+// ---------------------------------------------------------------------------
+// MCP server (C#): record mutations and receipt management tools on /mcp.
 // ---------------------------------------------------------------------------
 var mcpServer = builder.AddProject("mcp-server", "../mcp-server/mcp-server.csproj")
     .WithReference(cosmos)
     .WaitFor(cosmos)
+    .WithReference(receiptImages)
+    .WaitFor(receiptImages)
+    .WithEnvironment("Cosmos__DatabaseName", DatabaseName)
+    .WithEnvironment("Cosmos__TripsContainer", TripsContainer)
+    .WithEnvironment("Cosmos__ExpensesContainer", ExpensesContainer)
+    .WithEnvironment("Cosmos__ConversationsContainer", ConversationsContainer)
+    .WithHttpHealthCheck("/health");
+
+// Direct, read-only database access for the frontend; no agent or model needed.
+var recordsApi = builder.AddProject("expenses-api", "../expenses-api/expenses-api.csproj")
+    .WithReference(cosmos)
+    .WithReference(receiptImages)
+    .WithRoleAssignments(storage, StorageBuiltInRole.StorageBlobDataReader)
+    .WaitFor(cosmos)
+    .WaitFor(receiptImages)
+    .WaitFor(mcpServer) // The MCP startup initializers create the shared containers.
     .WithEnvironment("Cosmos__DatabaseName", DatabaseName)
     .WithEnvironment("Cosmos__TripsContainer", TripsContainer)
     .WithEnvironment("Cosmos__ExpensesContainer", ExpensesContainer)
@@ -80,19 +114,17 @@ var expensesAgent = builder.AddPythonApp(
         appDirectory: "../python-agent",
         scriptPath: "expenses_agent/main.py")
     .WithReference(chatModel).WaitFor(chatModel)
-    .WaitFor(miniModel)
-    .WaitFor(embeddingModel)
+    .WithReference(miniModel).WaitFor(miniModel)
+    .WithReference(embeddingModel).WaitFor(embeddingModel)
     .WithReference(mcpServer).WaitFor(mcpServer)
     // The durable-memory provider (Agent Memory Toolkit) reads and writes its own
     // Cosmos containers directly; trips and expenses still go through the MCP server.
-    .WithReference(cosmos).WaitFor(cosmos)
-    .WithEnvironment("COSMOS_DATABASE", DatabaseName)
     .WithEnvironment("ENABLE_COSMOS_MEMORY", builder.ExecutionContext.IsRunMode ? "false" : "true")
-    .WithEnvironment("MEMORY_CHAT_MODEL", "gpt5mini")
+    .WithEnvironment("MEMORY_CHAT_MODEL", "gpt5-4-mini")
     .WithEnvironment("MEMORY_EMBEDDING_MODEL", "TextEmbedding3Large")
     .WithEnvironment("contentUnderstandingEndpoint", contentUnderstandingEndpoint)
     // `to_llm_input` keeps only the extracted receipt fields (no page markdown).
-    .WithEnvironment("CONTENT_UNDERSTANDING_ANALYZER_ID", "ExpensesAnalyzer")
+    .WithEnvironment("CONTENT_UNDERSTANDING_ANALYZER_ID", AnalyzerId)
     .WithEnvironment("CONTENT_UNDERSTANDING_OUTPUT_SECTIONS", "fields")
     // Let Aspire allocate both the proxy port and the port uvicorn binds (injected
     // as PORT). Pinning them by hand invites proxy/target port clashes; the frontend
@@ -102,19 +134,41 @@ var expensesAgent = builder.AddPythonApp(
     .WithExternalHttpEndpoints()
     .WithOtlpExporter(OtlpProtocol.HttpProtobuf);
 
+if (builder.ExecutionContext.IsRunMode)
+{
+    var scripts = builder.AddPowerShell("scripts", languageMode: PSLanguageMode.FullLanguage);
+    scripts.AddScript("analyzer-setup", File.ReadAllText(
+            Path.GetFullPath("../../scripts/Initialize-ExpensesAnalyzer.ps1", builder.AppHostDirectory)))
+        .WithArgs(
+            contentUnderstandingEndpoint.Resource,
+            Path.GetFullPath("../analyzers/Expenses.json", builder.AppHostDirectory),
+            AnalyzerId,
+            chatModel.Resource.Name,
+            miniModel.Resource.Name,
+            embeddingModel.Resource.Name)
+        .WaitFor(chatModel)
+        .WaitFor(miniModel)
+        .WaitFor(embeddingModel);
+}
+
 if (builder.ExecutionContext.IsPublishMode)
 {
+    expensesAgent.WithReference(cosmos)
+        .WaitFor(cosmos)
+        .WithEnvironment("COSMOS_DATABASE", DatabaseName);
+    expensesAgent.PublishAsDockerFile(container =>
+        container.WithDockerfile("..", "python-agent/Dockerfile"));
     expensesAgent.AsHostedAgent(foundryProject);
 }
 
 // ---------------------------------------------------------------------------
-// React frontend. The Vite dev server proxies /chat, /api and /health to the
-// agent, so the app is same-origin and works from a phone on the same network.
+// Vite routes /api to the read API and /chat, /health to the agent.
 // ---------------------------------------------------------------------------
 builder.AddViteApp("frontend", "../frontend")
     .WithNpm()
     .WithReference(expensesAgent)
-    .WaitFor(expensesAgent)
+    .WithReference(recordsApi)
+    .WaitFor(recordsApi)
     .WithExternalHttpEndpoints();
 
 builder.Build().Run();

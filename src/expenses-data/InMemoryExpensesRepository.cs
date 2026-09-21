@@ -1,12 +1,11 @@
 using System.Collections.Concurrent;
-using ExpensesMcpServer.Models;
+using Expenses.Data.Models;
 
-namespace ExpensesMcpServer.Data;
+namespace Expenses.Data;
 
 /// <summary>
-/// Thread-safe in-memory repository. Used by the unit tests, and as a fallback
-/// when <c>Cosmos:UseInMemory</c> is set so the MCP server can be started
-/// without a database (handy for smoke tests).
+/// Process-local repository for explicitly opted-in development smoke runs.
+/// Aspire always uses Cosmos so the MCP server and read API share data.
 /// </summary>
 public sealed class InMemoryExpensesRepository : IExpensesRepository
 {
@@ -128,6 +127,8 @@ public sealed class InMemoryExpensesRepository : IExpensesRepository
         expense.Currency = patch.Currency ?? expense.Currency;
         expense.LineItems = patch.LineItems ?? expense.LineItems;
         expense.Notes = patch.Notes ?? expense.Notes;
+        expense.SourceImage = patch.SourceImage ?? expense.SourceImage;
+        expense.PhotoUrl = patch.PhotoUrl ?? expense.PhotoUrl;
         expense.UpdatedAt = DateTimeOffset.UtcNow;
 
         return Task.FromResult<Expense?>(expense);
@@ -149,22 +150,33 @@ public sealed class InMemoryExpensesRepository : IExpensesRepository
     {
         using var activity = Telemetry.StartRecordActivity("append", "conversation", userId, conversationId);
 
-        var conversation = _conversations.GetValueOrDefault(Key(userId, conversationId))
-            ?? new Conversation
-            {
-                Id = conversationId,
-                UserId = userId,
-                Title = title ?? ConversationTitle.FromMessages(messages),
-            };
-
-        conversation.Messages = [.. conversation.Messages, .. messages];
-        conversation.Title = title ?? (conversation.Title == "New conversation" ? ConversationTitle.FromMessages(messages) : conversation.Title);
-        conversation.TripId = tripId ?? conversation.TripId;
-        conversation.UpdatedAt = DateTimeOffset.UtcNow;
-
-        _conversations[Key(userId, conversationId)] = conversation;
+        Conversation Append(Conversation existing) => existing with
+        {
+            Messages = [.. existing.Messages, .. messages],
+            Title = title ?? (existing.Title == "New conversation" ? ConversationTitle.FromMessages(messages) : existing.Title),
+            TripId = tripId ?? existing.TripId,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        var conversation = _conversations.AddOrUpdate(Key(userId, conversationId),
+            _ => Append(new Conversation { Id = conversationId, UserId = userId }),
+            (_, existing) => Append(existing));
 
         return Task.FromResult(conversation);
+    }
+
+    public Task SaveReceiptCheckpointAsync(string userId, string conversationId, string key,
+        ReceiptCheckpoint checkpoint, CancellationToken cancellationToken = default)
+    {
+        Conversation Save(Conversation existing)
+        {
+            var updated = existing with { UpdatedAt = DateTimeOffset.UtcNow };
+            updated.SetReceiptCheckpoint(key, checkpoint);
+            return updated;
+        }
+        _conversations.AddOrUpdate(Key(userId, conversationId),
+            _ => Save(new Conversation { Id = conversationId, UserId = userId }),
+            (_, existing) => Save(existing));
+        return Task.CompletedTask;
     }
 
     public Task<Conversation?> GetConversationAsync(string userId, string conversationId, CancellationToken cancellationToken = default)

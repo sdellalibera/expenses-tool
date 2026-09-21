@@ -7,27 +7,26 @@ import type {
 } from "../types";
 
 /**
- * Base URL of the expenses agent.
- *
- * In development the Vite dev server proxies `/chat`, `/api` and `/health` to
- * the agent (see `vite.config.ts`), so the default empty base keeps every call
- * same-origin. That is what makes the app work from a phone on the LAN without
- * CORS or mixed-content problems.
+ * Empty bases keep requests and receipt images same-origin through Vite's
+ * separate agent and records proxies, including from a phone on the LAN.
+ * Explicit overrides allow calling either service directly.
  */
-const API_BASE = (import.meta.env.VITE_AGENT_API_URL as string | undefined)?.replace(/\/+$/, "") ?? "";
+const AGENT_API_BASE = import.meta.env.VITE_AGENT_API_URL?.replace(/\/+$/, "") ?? "";
+const RECORDS_API_BASE = import.meta.env.VITE_RECORDS_API_URL?.replace(/\/+$/, "") ?? "";
 
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly retryAfterSeconds: number | null = null,
   ) {
     super(message);
     this.name = "ApiError";
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, init);
+async function request<T>(base: string, path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${base}${path}`, init);
 
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`;
@@ -37,7 +36,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* keep the status line */
     }
-    throw new ApiError(detail, response.status);
+    const retryAfter = Number(response.headers.get("Retry-After"));
+    throw new ApiError(detail, response.status, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null);
   }
 
   if (response.status === 204) return undefined as T;
@@ -54,7 +54,8 @@ function query(params: Record<string, string | undefined | null>): string {
 }
 
 export const api = {
-  health: () => request<{ status: string; agentReady: boolean; error: string | null }>("/health"),
+  health: () =>
+    request<{ status: string; agentReady: boolean; error: string | null }>(AGENT_API_BASE, "/health"),
 
   chat: async (input: {
     userId: string;
@@ -70,34 +71,30 @@ export const api = {
       form.append("images", image, image.name || "receipt.jpg");
     }
 
-    return request<ChatResponse>("/chat", { method: "POST", body: form });
+    return request<ChatResponse>(AGENT_API_BASE, "/chat", { method: "POST", body: form });
   },
 
   listTrips: (userId: string, status?: string) =>
-    request<TripSummary[]>(`/api/trips${query({ userId, status })}`),
+    request<TripSummary[]>(RECORDS_API_BASE, `/api/trips${query({ userId, status })}`),
 
   getTrip: (userId: string, tripId: string) =>
-    request<TripSummary>(`/api/trips/${encodeURIComponent(tripId)}${query({ userId })}`),
-
-  deleteTrip: (userId: string, tripId: string) =>
-    request<{ deleted: boolean }>(`/api/trips/${encodeURIComponent(tripId)}${query({ userId })}`, {
-      method: "DELETE",
-    }),
+    request<TripSummary>(RECORDS_API_BASE, `/api/trips/${encodeURIComponent(tripId)}${query({ userId })}`),
 
   listExpenses: (userId: string, tripId?: string) =>
-    request<Expense[]>(`/api/expenses${query({ userId, tripId })}`),
+    request<Expense[]>(RECORDS_API_BASE, `/api/expenses${query({ userId, tripId })}`),
 
   getExpense: (userId: string, expenseId: string) =>
-    request<Expense>(`/api/expenses/${encodeURIComponent(expenseId)}${query({ userId })}`),
+    request<Expense>(RECORDS_API_BASE, `/api/expenses/${encodeURIComponent(expenseId)}${query({ userId })}`),
 
-  deleteExpense: (userId: string, expenseId: string) =>
-    request<{ deleted: boolean }>(`/api/expenses/${encodeURIComponent(expenseId)}${query({ userId })}`, {
-      method: "DELETE",
-    }),
+  expensePhotoUrl: (userId: string, expenseId: string) =>
+    `${RECORDS_API_BASE}/api/expenses/${encodeURIComponent(expenseId)}/photo${query({ userId })}`,
 
   listConversations: (userId: string) =>
-    request<ConversationSummary[]>(`/api/conversations${query({ userId })}`),
+    request<ConversationSummary[]>(RECORDS_API_BASE, `/api/conversations${query({ userId })}`),
 
   getConversation: (userId: string, conversationId: string) =>
-    request<Conversation>(`/api/conversations/${encodeURIComponent(conversationId)}${query({ userId })}`),
+    request<Conversation>(
+      RECORDS_API_BASE,
+      `/api/conversations/${encodeURIComponent(conversationId)}${query({ userId })}`,
+    ),
 };

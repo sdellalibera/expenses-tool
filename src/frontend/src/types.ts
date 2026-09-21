@@ -1,4 +1,4 @@
-/** Shapes returned by the expenses agent API (which proxies the MCP server). */
+/** Shapes returned by the records API and the expenses agent's chat endpoint. */
 
 export interface Trip {
   id: string;
@@ -39,6 +39,7 @@ export interface Expense {
   lineItems: ExpenseLineItem[];
   notes?: string | null;
   sourceImage?: string | null;
+  photoUrl?: string | null;
   conversationId?: string | null;
   createdAt: string;
   updatedAt: string;

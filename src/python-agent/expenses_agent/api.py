@@ -1,17 +1,7 @@
-"""FastAPI surface of the expenses agent.
+"""Chat transport and health endpoints for the expenses agent.
 
-The React frontend only ever talks to this service:
-
-* ``POST /chat``                     – one chat turn (text + optional receipt photos)
-* ``GET  /health``                   – liveness/readiness for Aspire
-* ``GET  /api/trips``                – trips of a user, with expense roll-ups
-* ``GET  /api/trips/{tripId}``       – one trip
-* ``GET  /api/expenses``             – expenses of a user, optionally per trip
-* ``GET  /api/expenses/{expenseId}`` – one expense
-* ``GET  /api/conversations``        – chat history index
-* ``GET  /api/conversations/{id}``   – one transcript
-
-Everything under ``/api`` is proxied to the MCP server, which owns Cosmos DB.
+All business operations go through the agent and its MCP tools.
+The separate .NET API serves all frontend reads, including private receipt photos.
 """
 
 from __future__ import annotations
@@ -20,14 +10,14 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from .agent import Attachment, ExpensesAgent
 from .config import Settings, load_settings
-from .mcp_client import ExpensesMcpClient, McpToolError
-from .observability import configure, instrument_app
+from .images import SUPPORTED_IMAGE_TYPES, validate_image
+from .mcp_client import McpToolError
+from .observability import configure, instrument_app, retry_after_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +27,7 @@ MAX_UPLOAD_BYTES = 12 * 1024 * 1024
 def create_app(settings: Settings | None = None, agent: ExpensesAgent | None = None) -> FastAPI:
     """Build the FastAPI application.
 
-    ``agent`` can be injected by the tests to avoid touching Azure.
+    An injected ``agent`` lets the caller own its lifecycle.
     """
     settings = settings or load_settings()
     configure(settings.service_name, enable_sensitive_data=settings.enable_sensitive_telemetry)
@@ -47,11 +37,11 @@ def create_app(settings: Settings | None = None, agent: ExpensesAgent | None = N
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         instance = agent or ExpensesAgent(settings)
-        if owns_agent:
-            await instance.start()
         application.state.agent = instance
         application.state.settings = settings
         try:
+            if owns_agent:
+                await instance.start()
             yield
         finally:
             if owns_agent:
@@ -70,16 +60,11 @@ def create_app(settings: Settings | None = None, agent: ExpensesAgent | None = N
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["Retry-After"],
     )
 
     def current_agent(request: Request) -> ExpensesAgent:
         return request.app.state.agent
-
-    def mcp_of(request: Request) -> ExpensesMcpClient:
-        client = current_agent(request).mcp
-        if client is None:
-            raise HTTPException(status_code=503, detail="The MCP server is not configured.")
-        return client
 
     # ---- health ------------------------------------------------------
 
@@ -115,18 +100,27 @@ def create_app(settings: Settings | None = None, agent: ExpensesAgent | None = N
 
         attachments: list[Attachment] = []
         for upload in images or []:
-            if not upload.filename:
-                continue
-            data = await upload.read()
+            filename = upload.filename or "receipt"
+            content_type = (upload.content_type or "").split(";", 1)[0].strip().lower()
+            if content_type not in SUPPORTED_IMAGE_TYPES:
+                raise HTTPException(
+                    status_code=415,
+                    detail=f"'{filename}' must be a JPEG, PNG, GIF, WebP, BMP or TIFF image.",
+                )
+            data = await upload.read(MAX_UPLOAD_BYTES + 1)
             if not data:
-                continue
+                raise HTTPException(status_code=400, detail=f"'{filename}' is empty. Choose a receipt photo.")
             if len(data) > MAX_UPLOAD_BYTES:
-                raise HTTPException(status_code=413, detail=f"'{upload.filename}' is larger than 12 MB.")
+                raise HTTPException(status_code=413, detail=f"'{filename}' is larger than 12 MiB.")
+            try:
+                validate_image(data, content_type)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=f"'{filename}': {exc}") from exc
             attachments.append(
                 Attachment(
                     data=data,
-                    content_type=upload.content_type or "image/jpeg",
-                    filename=upload.filename,
+                    content_type=content_type,
+                    filename=filename,
                 )
             )
 
@@ -156,95 +150,11 @@ def create_app(settings: Settings | None = None, agent: ExpensesAgent | None = N
                 raise HTTPException(
                     status_code=429,
                     detail="The Foundry model deployment is rate limited (HTTP 429). Wait a moment and try again, or raise the deployment quota.",
+                    headers={"Retry-After": str(retry_after_seconds(exc) or 60)},
                 ) from exc
             raise HTTPException(status_code=502, detail=f"The agent could not complete this turn: {detail}") from exc
 
         return turn.to_dict()
-
-    # ---- records (proxied to the MCP server) -------------------------
-
-    @app.get("/api/trips", tags=["records"])
-    async def list_trips(
-        request: Request,
-        userId: Annotated[str, Query(description="Identifier of the user.")],
-        status: Annotated[str | None, Query(description="open, submitted or closed.")] = None,
-    ) -> list[dict[str, Any]]:
-        return await mcp_of(request).list_trips(userId, status)
-
-    @app.get("/api/trips/{trip_id}", tags=["records"])
-    async def get_trip(
-        request: Request,
-        trip_id: str,
-        userId: Annotated[str, Query(description="Identifier of the user.")],
-    ) -> dict[str, Any]:
-        trip = await mcp_of(request).get_trip(userId, trip_id)
-        if not trip:
-            raise HTTPException(status_code=404, detail=f"Trip '{trip_id}' was not found.")
-        return trip
-
-    @app.delete("/api/trips/{trip_id}", tags=["records"])
-    async def delete_trip(
-        request: Request,
-        trip_id: str,
-        userId: Annotated[str, Query(description="Identifier of the user.")],
-    ) -> dict[str, Any]:
-        deleted = await mcp_of(request).delete_trip(userId, trip_id)
-        if not deleted:
-            raise HTTPException(status_code=404, detail=f"Trip '{trip_id}' was not found.")
-        return {"deleted": True, "tripId": trip_id}
-
-    @app.get("/api/expenses", tags=["records"])
-    async def list_expenses(
-        request: Request,
-        userId: Annotated[str, Query(description="Identifier of the user.")],
-        tripId: Annotated[str | None, Query(description="Restrict to one trip.")] = None,
-    ) -> list[dict[str, Any]]:
-        return await mcp_of(request).list_expenses(userId, tripId)
-
-    @app.get("/api/expenses/{expense_id}", tags=["records"])
-    async def get_expense(
-        request: Request,
-        expense_id: str,
-        userId: Annotated[str, Query(description="Identifier of the user.")],
-    ) -> dict[str, Any]:
-        expense = await mcp_of(request).get_expense(userId, expense_id)
-        if not expense:
-            raise HTTPException(status_code=404, detail=f"Expense '{expense_id}' was not found.")
-        return expense
-
-    @app.delete("/api/expenses/{expense_id}", tags=["records"])
-    async def delete_expense(
-        request: Request,
-        expense_id: str,
-        userId: Annotated[str, Query(description="Identifier of the user.")],
-    ) -> dict[str, Any]:
-        deleted = await mcp_of(request).delete_expense(userId, expense_id)
-        if not deleted:
-            raise HTTPException(status_code=404, detail=f"Expense '{expense_id}' was not found.")
-        return {"deleted": True, "expenseId": expense_id}
-
-    @app.get("/api/conversations", tags=["records"])
-    async def list_conversations(
-        request: Request,
-        userId: Annotated[str, Query(description="Identifier of the user.")],
-    ) -> list[dict[str, Any]]:
-        return await mcp_of(request).list_conversations(userId)
-
-    @app.get("/api/conversations/{conversation_id}", tags=["records"])
-    async def get_conversation(
-        request: Request,
-        conversation_id: str,
-        userId: Annotated[str, Query(description="Identifier of the user.")],
-    ) -> dict[str, Any]:
-        conversation = await mcp_of(request).get_conversation(userId, conversation_id)
-        if not conversation:
-            raise HTTPException(status_code=404, detail=f"Conversation '{conversation_id}' was not found.")
-        return conversation
-
-    @app.exception_handler(McpToolError)
-    async def mcp_error_handler(_: Request, exc: McpToolError) -> JSONResponse:
-        logger.error("MCP tool error: %s", exc)
-        return JSONResponse(status_code=502, content={"detail": str(exc)})
 
     instrument_app(app)
     return app

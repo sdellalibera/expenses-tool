@@ -1,6 +1,6 @@
 using System.ComponentModel;
 
-namespace ExpensesMcpServer.Models;
+namespace Expenses.Data.Models;
 
 /// <summary>
 /// The persisted transcript of one chat between a user and the expenses agent.
@@ -23,9 +23,34 @@ public sealed record Conversation
     [Description("Ordered transcript of the conversation.")]
     public IReadOnlyList<ConversationMessage> Messages { get; set; } = [];
 
+    public IReadOnlyDictionary<string, ReceiptCheckpoint> ReceiptCheckpoints { get; set; } = new Dictionary<string, ReceiptCheckpoint>();
+
+    public void SetReceiptCheckpoint(string key, ReceiptCheckpoint checkpoint)
+    {
+        var checkpoints = ReceiptCheckpoints.ToDictionary(entry => entry.Key, entry => entry.Value);
+        if (checkpoints.TryGetValue(key, out var previous) && previous.AnalysisJson is not null && checkpoint.AnalysisJson is null)
+        {
+            return;
+        }
+        checkpoints[key] = checkpoint with { UpdatedAt = DateTimeOffset.UtcNow };
+        ReceiptCheckpoints = checkpoints.OrderByDescending(entry => entry.Value.UpdatedAt).Take(16)
+            .ToDictionary(entry => entry.Key, entry => entry.Value);
+    }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed record ReceiptCheckpoint
+{
+    public required string DocumentKey { get; init; }
+    public required string BlobName { get; init; }
+    public required string FileName { get; init; }
+    public required string PhotoUrl { get; init; }
+    public required string ConversationId { get; init; }
+    public string? AnalysisJson { get; init; }
+    public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
 }
 
 /// <summary>A single turn in a conversation.</summary>
@@ -36,6 +61,9 @@ public sealed record ConversationMessage
 
     [Description("Text content of the message.")]
     public string Text { get; set; } = string.Empty;
+
+    [Description("Receipt references and extracted fields replayed to the agent, separate from the displayed message.")]
+    public string? ReceiptContext { get; set; }
 
     [Description("Names of the tools invoked while producing this message.")]
     public IReadOnlyList<string> ToolCalls { get; set; } = [];

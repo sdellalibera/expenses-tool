@@ -1,6 +1,6 @@
 using System.ComponentModel;
-using ExpensesMcpServer.Data;
-using ExpensesMcpServer.Models;
+using Expenses.Data;
+using Expenses.Data.Models;
 using ModelContextProtocol.Server;
 
 namespace ExpensesMcpServer.Tools;
@@ -12,6 +12,44 @@ namespace ExpensesMcpServer.Tools;
 [McpServerToolType]
 public sealed class ConversationTools(IExpensesRepository repository, ILogger<ConversationTools> logger)
 {
+    [McpServerTool(Name = "save_receipt_checkpoint", UseStructuredContent = true)]
+    [Description("Persist an uploaded receipt reference and optional extracted JSON for retrying a conversation without repeating receipt processing.")]
+    public async Task<bool> SaveReceiptCheckpointAsync(string userId, string conversationId, string key,
+        ReceiptCheckpoint checkpoint, CancellationToken cancellationToken = default)
+    {
+        ToolGuard.RequireUserId(userId);
+        ToolGuard.RequireValue(conversationId, nameof(conversationId));
+        if (key.Length != 64 || !key.All(char.IsAsciiHexDigit))
+        {
+            throw new ArgumentException("Checkpoint key must be a SHA-256 hash.", nameof(key));
+        }
+        if (checkpoint.ConversationId != conversationId)
+        {
+            throw new ArgumentException("Checkpoint conversation does not match.", nameof(checkpoint));
+        }
+        foreach (var value in new[] { checkpoint.DocumentKey, checkpoint.BlobName, checkpoint.FileName, checkpoint.PhotoUrl })
+        {
+            if (string.IsNullOrWhiteSpace(value) || value.Length > 2048)
+            {
+                throw new ArgumentException("Invalid receipt reference.", nameof(checkpoint));
+            }
+        }
+        if (checkpoint.AnalysisJson is not null)
+        {
+            if (System.Text.Encoding.UTF8.GetByteCount(checkpoint.AnalysisJson) > 32768)
+            {
+                throw new ArgumentException("Receipt checkpoint exceeds 32 KiB.", nameof(checkpoint));
+            }
+            using var parsed = System.Text.Json.JsonDocument.Parse(checkpoint.AnalysisJson);
+            if (parsed.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
+            {
+                throw new ArgumentException("Receipt checkpoint must contain a JSON object.", nameof(checkpoint));
+            }
+        }
+        await repository.SaveReceiptCheckpointAsync(userId, conversationId, key, checkpoint, cancellationToken);
+        return true;
+    }
+
     [McpServerTool(Name = "append_conversation_messages", UseStructuredContent = true)]
     [Description("Append one or more messages to a conversation transcript, creating the conversation when it does not exist yet.")]
     public async Task<Conversation> AppendAsync(

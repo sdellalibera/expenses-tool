@@ -1,0 +1,78 @@
+{
+  "description": "Extract business-travel expense fields from a receipt. Application identifiers, image URLs and timestamps are supplied by the application, not extracted or invented.",
+  "baseAnalyzerId": "prebuilt-document",
+  "config": {
+    "returnDetails": false,
+    "enableOcr": true,
+    "enableLayout": true,
+    "estimateFieldSourceAndConfidence": true
+  },
+  "models": {
+    "completion": "gpt-5.4",
+    "embedding": "text-embedding-3-large"
+  },
+  "fieldSchema": {
+    "fields": {
+      "merchant": {
+        "type": "string",
+        "method": "extract",
+        "description": "Name of the merchant, restaurant, hotel or service provider."
+      },
+      "category": {
+        "type": "string",
+        "method": "generate",
+        "description": "Expense category: food, hotel, flight, ground transport, or other."
+      },
+      "date": {
+        "type": "date",
+        "method": "extract",
+        "description": "Receipt transaction date in YYYY-MM-DD format. Leave absent when not printed; do not invent a date."
+      },
+      "totalAmount": {
+        "type": "number",
+        "method": "extract",
+        "description": "Final total paid, including taxes and tips, in the receipt currency."
+      },
+      "currency": {
+        "type": "string",
+        "method": "extract",
+        "description": "Three-letter ISO 4217 currency code when identifiable from the receipt."
+      },
+      "lineItems": {
+        "type": "array",
+        "method": "generate",
+        "description": "Purchased items or services, excluding duplicate subtotal and grand-total rows.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string",
+              "method": "extract",
+              "description": "Description of the purchased item or service."
+            },
+            "category": {
+              "type": "string",
+              "method": "generate",
+              "description": "Item category: food, drink, hotel, flight, ground transport, or other."
+            },
+            "price": {
+              "type": "number",
+              "method": "extract",
+              "description": "Price paid for this receipt line item, in the receipt currency."
+            },
+            "quantity": {
+              "type": "number",
+              "method": "extract",
+              "description": "Quantity purchased, when stated on the receipt."
+            }
+          }
+        }
+      },
+      "notes": {
+        "type": "string",
+        "method": "generate",
+        "description": "Relevant receipt details or extraction uncertainties. Do not invent identifiers, dates, timestamps or image URLs."
+      }
+    }
+  }
+}

@@ -53,6 +53,9 @@ class Settings:
 
     foundry_endpoint: str | None = None
     foundry_deployment: str | None = None
+    model_max_output_tokens: int = 2048
+    model_reasoning_effort: str = "low"
+    model_max_retries: int = 2
     content_understanding_endpoint: str | None = None
     analyzer_id: str = "ExpensesAnalyzer"
     # Which sections of the Content Understanding analysis reach the model.
@@ -75,6 +78,8 @@ class Settings:
     enable_sensitive_telemetry: bool = True
     allowed_origins: list[str] = field(default_factory=lambda: ["*"])
     max_history_messages: int = 40
+    max_history_tokens: int = 4096
+    receipt_cache_version: str = "1"
 
     @property
     def mcp_endpoint(self) -> str | None:
@@ -93,6 +98,9 @@ class Settings:
         return {
             "foundryEndpoint": self.foundry_endpoint,
             "foundryDeployment": self.foundry_deployment,
+            "modelMaxOutputTokens": self.model_max_output_tokens,
+            "modelReasoningEffort": self.model_reasoning_effort,
+            "maxHistoryTokens": self.max_history_tokens,
             "contentUnderstandingEndpoint": self.content_understanding_endpoint,
             "analyzerId": self.analyzer_id,
             "contentUnderstandingSections": self.content_understanding_sections,
@@ -114,10 +122,23 @@ def load_settings() -> Settings:
 
     # Foundry: Aspire hands the model deployment over as a connection string.
     connection = _parse_connection_string(
-        _first_env("ConnectionStrings__gpt5", "ConnectionStrings__foundry", default="") or ""
+        _first_env("ConnectionStrings__gpt5-4", "ConnectionStrings__foundry", default="") or ""
     )
     settings.foundry_endpoint = _first_env("FOUNDRY_ENDPOINT", "FOUNDRY_PROJECT_ENDPOINT") or connection.get("endpoint")
     settings.foundry_deployment = _first_env("FOUNDRY_DEPLOYMENT", "FOUNDRY_MODEL") or connection.get("deployment") or connection.get("model")
+    settings.model_max_output_tokens = int(_first_env("MODEL_MAX_OUTPUT_TOKENS", default="2048"))
+    settings.model_reasoning_effort = _first_env("MODEL_REASONING_EFFORT", default="low")
+    settings.model_max_retries = int(_first_env("MODEL_MAX_RETRIES", default="2"))
+    settings.max_history_tokens = int(_first_env("MAX_HISTORY_TOKENS", default="4096"))
+    settings.receipt_cache_version = _first_env("RECEIPT_CACHE_VERSION", default="1")
+    if not 256 <= settings.max_history_tokens <= 32768:
+        raise ValueError("MAX_HISTORY_TOKENS must be between 256 and 32768.")
+    if not 256 <= settings.model_max_output_tokens <= 16384:
+        raise ValueError("MODEL_MAX_OUTPUT_TOKENS must be between 256 and 16384.")
+    if settings.model_reasoning_effort not in {"none", "low", "medium", "high"}:
+        raise ValueError("MODEL_REASONING_EFFORT must be none, low, medium or high.")
+    if not 0 <= settings.model_max_retries <= 5:
+        raise ValueError("MODEL_MAX_RETRIES must be between 0 and 5.")
 
     settings.content_understanding_endpoint = _first_env(
         "contentUnderstandingEndpoint",
@@ -125,6 +146,9 @@ def load_settings() -> Settings:
         "AZURE_CONTENTUNDERSTANDING_ENDPOINT",
     )
     settings.analyzer_id = _first_env("CONTENT_UNDERSTANDING_ANALYZER_ID", default="ExpensesAnalyzer") or "ExpensesAnalyzer"
+    embedding = _parse_connection_string(
+        _first_env("ConnectionStrings__TextEmbedding3Large", "ConnectionStrings__textembedding3large", default="") or ""
+    )
 
     sections = _first_env("CONTENT_UNDERSTANDING_OUTPUT_SECTIONS")
     if sections:
@@ -137,12 +161,18 @@ def load_settings() -> Settings:
 
     # Cosmos DB, used directly by the durable-memory provider (records still go
     # through the MCP server).
-    cosmos = _parse_connection_string(_first_env("ConnectionStrings__cosmos-db", default="") or "")
-    settings.cosmos_endpoint = _first_env("COSMOS_ENDPOINT") or cosmos.get("accountendpoint")
+    cosmos_connection = (_first_env("ConnectionStrings__cosmos-db", default="") or "").strip()
+    cosmos = _parse_connection_string(cosmos_connection)
+    # Aspire publishes an endpoint for managed identity, but the emulator uses
+    # AccountEndpoint/AccountKey. Neither form should require a production key.
+    cosmos_endpoint = cosmos.get("accountendpoint")
+    if not cosmos_endpoint and cosmos_connection.lower().startswith(("https://", "http://")):
+        cosmos_endpoint = cosmos_connection
+    settings.cosmos_endpoint = _first_env("COSMOS_ENDPOINT") or cosmos_endpoint
     settings.cosmos_key = _first_env("COSMOS_KEY") or cosmos.get("accountkey")
     settings.cosmos_database = _first_env("COSMOS_DATABASE", default="db") or "db"
     settings.memory_chat_model = _first_env("MEMORY_CHAT_MODEL") or settings.foundry_deployment
-    settings.memory_embedding_model = _first_env("MEMORY_EMBEDDING_MODEL")
+    settings.memory_embedding_model = _first_env("MEMORY_EMBEDDING_MODEL") or embedding.get("deployment") or embedding.get("model")
     settings.memory_top_k = int(_first_env("MEMORY_TOP_K", default="5") or "5")
     settings.enable_cosmos_memory = (_first_env("ENABLE_COSMOS_MEMORY", default="true") or "true").lower() not in {
         "false",

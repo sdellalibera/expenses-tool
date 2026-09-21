@@ -1,6 +1,6 @@
 using System.ComponentModel;
-using ExpensesMcpServer.Data;
-using ExpensesMcpServer.Models;
+using Expenses.Data;
+using Expenses.Data.Models;
 using ModelContextProtocol.Server;
 
 namespace ExpensesMcpServer.Tools;
@@ -10,7 +10,7 @@ namespace ExpensesMcpServer.Tools;
 /// trip, which is what groups a Munich trip apart from a Seattle one.
 /// </summary>
 [McpServerToolType]
-public sealed class ExpenseTools(IExpensesRepository repository, ILogger<ExpenseTools> logger)
+public sealed class ExpenseTools(IExpensesRepository repository, ReceiptStorage receipts, ILogger<ExpenseTools> logger)
 {
     [McpServerTool(Name = "create_expense", UseStructuredContent = true)]
     [Description("Record a new expense on an existing work trip. Call create_trip first if the trip does not exist yet. Returns the created expense including its generated id.")]
@@ -26,6 +26,7 @@ public sealed class ExpenseTools(IExpensesRepository repository, ILogger<Expense
         [Description("Optional free form note about the expense.")] string? notes = null,
         [Description("File name of the receipt image the expense was extracted from.")] string? sourceImage = null,
         [Description("Identifier of the chat conversation the expense was created in.")] string? conversationId = null,
+        [Description("Exact photoUrl returned by upload_receipt_image for this receipt. Never invent this URL.")] string? photoUrl = null,
         CancellationToken cancellationToken = default)
     {
         ToolGuard.RequireUserId(userId);
@@ -33,9 +34,20 @@ public sealed class ExpenseTools(IExpensesRepository repository, ILogger<Expense
         ToolGuard.RequireValue(merchant, nameof(merchant));
         ToolGuard.RequireValue(date, nameof(date));
         ToolGuard.RequireNonNegative(totalAmount, nameof(totalAmount));
+        if (sourceImage is not null && photoUrl is null)
+        {
+            throw new ArgumentException("Receipt expenses require the photoUrl returned by upload_receipt_image. Use list_receipt_images to recover an earlier upload.", nameof(photoUrl));
+        }
 
         var trip = await repository.GetTripAsync(userId, tripId, cancellationToken)
             ?? throw new ArgumentException($"Trip '{tripId}' does not exist for this user. Create it with create_trip first.", nameof(tripId));
+
+        if (photoUrl is not null)
+        {
+            var receipt = await receipts.GetByUrlAsync(userId, photoUrl, cancellationToken)
+                ?? throw new ArgumentException("The receipt photo does not exist for this user.", nameof(photoUrl));
+            sourceImage = receipt.FileName;
+        }
 
         logger.LogInformation(
             "MCP tool create_expense invoked by user {UserId}: {Merchant} {TotalAmount} {Currency} on trip {TripName}",
@@ -54,6 +66,7 @@ public sealed class ExpenseTools(IExpensesRepository repository, ILogger<Expense
                 LineItems = lineItems ?? [],
                 Notes = notes,
                 SourceImage = sourceImage,
+                PhotoUrl = photoUrl,
                 ConversationId = conversationId,
             },
             cancellationToken);
@@ -104,6 +117,8 @@ public sealed class ExpenseTools(IExpensesRepository repository, ILogger<Expense
         [Description("New ISO 4217 currency code.")] string? currency = null,
         [Description("Replacement list of line items.")] IReadOnlyList<ExpenseLineItem>? lineItems = null,
         [Description("New note.")] string? notes = null,
+        [Description("Replacement receipt photoUrl returned by upload_receipt_image.")] string? photoUrl = null,
+        [Description("Original receipt image filename.")] string? sourceImage = null,
         CancellationToken cancellationToken = default)
     {
         ToolGuard.RequireUserId(userId);
@@ -117,6 +132,13 @@ public sealed class ExpenseTools(IExpensesRepository repository, ILogger<Expense
         if (tripId is not null && await repository.GetTripAsync(userId, tripId, cancellationToken) is null)
         {
             throw new ArgumentException($"Trip '{tripId}' does not exist for this user.", nameof(tripId));
+        }
+
+        if (photoUrl is not null)
+        {
+            var receipt = await receipts.GetByUrlAsync(userId, photoUrl, cancellationToken)
+                ?? throw new ArgumentException("The receipt photo does not exist for this user.", nameof(photoUrl));
+            sourceImage = receipt.FileName;
         }
 
         logger.LogInformation("MCP tool update_expense invoked by user {UserId} for expense {ExpenseId}", userId, expenseId);
@@ -134,6 +156,8 @@ public sealed class ExpenseTools(IExpensesRepository repository, ILogger<Expense
                 Currency = currency,
                 LineItems = lineItems,
                 Notes = notes,
+                PhotoUrl = photoUrl,
+                SourceImage = sourceImage,
             },
             cancellationToken);
     }
