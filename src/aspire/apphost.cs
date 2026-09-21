@@ -5,6 +5,7 @@
 #:package Aspire.Hosting.Foundry@13.5.2-preview.1.26421.6
 #:package Aspire.Hosting.JavaScript@13.5.2
 #:package Aspire.Hosting.Python@13.5.2
+#:package CommunityToolkit.Aspire.Hosting.PowerShell@13.5.0
 
 //Sdks
 #:sdk Aspire.AppHost.Sdk@13.5.2
@@ -16,6 +17,8 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Foundry;
 using Azure.Provisioning.Storage;
+using CommunityToolkit.Aspire.Hosting.PowerShell;
+using System.Management.Automation;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
@@ -26,13 +29,14 @@ var builder = DistributedApplication.CreateBuilder(args);
 var foundry = builder.AddFoundry("foundry");
 var foundryProject = foundry.AddProject("expenses");
 
-var chatModel = foundryProject.AddModelDeployment("gpt5", FoundryModel.OpenAI.Gpt5);
-var miniModel = foundryProject.AddModelDeployment("gpt5mini", FoundryModel.OpenAI.Gpt5Mini);
+var chatModel = foundryProject.AddModelDeployment("gpt5-4", FoundryModel.OpenAI.Gpt54);
+var miniModel = foundryProject.AddModelDeployment("gpt5-4-mini", FoundryModel.OpenAI.Gpt54Mini);
 var embeddingModel = foundryProject.AddModelDeployment("TextEmbedding3Large", FoundryModel.OpenAI.TextEmbedding3Large);
 
 // Content Understanding lives on the same AI Services account; its endpoint is
 // supplied as a parameter (`aspire secret set Parameters:contentUnderstandingEndpoint ...`).
 var contentUnderstandingEndpoint = builder.AddParameter("contentUnderstandingEndpoint");
+const string AnalyzerId = "ExpensesAnalyzer";
 
 // ---------------------------------------------------------------------------
 // Cosmos DB: conversation transcripts + every trip and expense record.
@@ -116,11 +120,11 @@ var expensesAgent = builder.AddPythonApp(
     // The durable-memory provider (Agent Memory Toolkit) reads and writes its own
     // Cosmos containers directly; trips and expenses still go through the MCP server.
     .WithEnvironment("ENABLE_COSMOS_MEMORY", builder.ExecutionContext.IsRunMode ? "false" : "true")
-    .WithEnvironment("MEMORY_CHAT_MODEL", "gpt5mini")
+    .WithEnvironment("MEMORY_CHAT_MODEL", "gpt5-4-mini")
     .WithEnvironment("MEMORY_EMBEDDING_MODEL", "TextEmbedding3Large")
     .WithEnvironment("contentUnderstandingEndpoint", contentUnderstandingEndpoint)
     // `to_llm_input` keeps only the extracted receipt fields (no page markdown).
-    .WithEnvironment("CONTENT_UNDERSTANDING_ANALYZER_ID", "ExpensesAnalyzer")
+    .WithEnvironment("CONTENT_UNDERSTANDING_ANALYZER_ID", AnalyzerId)
     .WithEnvironment("CONTENT_UNDERSTANDING_OUTPUT_SECTIONS", "fields")
     // Let Aspire allocate both the proxy port and the port uvicorn binds (injected
     // as PORT). Pinning them by hand invites proxy/target port clashes; the frontend
@@ -129,6 +133,23 @@ var expensesAgent = builder.AddPythonApp(
     .WithHttpHealthCheck("/health")
     .WithExternalHttpEndpoints()
     .WithOtlpExporter(OtlpProtocol.HttpProtobuf);
+
+if (builder.ExecutionContext.IsRunMode)
+{
+    var scripts = builder.AddPowerShell("scripts", languageMode: PSLanguageMode.FullLanguage);
+    scripts.AddScript("analyzer-setup", File.ReadAllText(
+            Path.GetFullPath("../../scripts/Initialize-ExpensesAnalyzer.ps1", builder.AppHostDirectory)))
+        .WithArgs(
+            contentUnderstandingEndpoint.Resource,
+            Path.GetFullPath("../analyzers/Expenses.json", builder.AppHostDirectory),
+            AnalyzerId,
+            chatModel.Resource.Name,
+            miniModel.Resource.Name,
+            embeddingModel.Resource.Name)
+        .WaitFor(chatModel)
+        .WaitFor(miniModel)
+        .WaitFor(embeddingModel);
+}
 
 if (builder.ExecutionContext.IsPublishMode)
 {
@@ -141,7 +162,7 @@ if (builder.ExecutionContext.IsPublishMode)
 }
 
 // ---------------------------------------------------------------------------
-// Vite routes /api to the read API and /chat, /commands, /health to the agent.
+// Vite routes /api to the read API and /chat, /health to the agent.
 // ---------------------------------------------------------------------------
 builder.AddViteApp("frontend", "../frontend")
     .WithNpm()

@@ -8,7 +8,7 @@
     "estimateFieldSourceAndConfidence": true
   },
   "models": {
-    "completion": "gpt-5",
+    "completion": "gpt-5.4",
     "embedding": "text-embedding-3-large"
   },
   "fieldSchema": {

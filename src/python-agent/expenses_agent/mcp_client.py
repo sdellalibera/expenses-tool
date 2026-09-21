@@ -5,7 +5,7 @@ the MCP server — the agent never opens a database connection for trips or
 expenses. This module wraps the raw MCP ``call_tool`` plumbing in small typed
 helpers used by:
 
-* deterministic receipt uploads and explicit delete commands,
+* deterministic receipt uploads,
 * the Cosmos backed conversation history provider.
 
 The agent's *own* tool calling uses :class:`agent_framework.MCPStreamableHTTPTool`
@@ -130,9 +130,6 @@ class ExpensesMcpClient:
     async def create_trip(self, user_id: str, name: str, **kwargs: Any) -> dict[str, Any]:
         return await self.call("create_trip", {"userId": user_id, "name": name, **kwargs})
 
-    async def delete_trip(self, user_id: str, trip_id: str) -> bool:
-        return bool(await self.call("delete_trip", {"userId": user_id, "tripId": trip_id}))
-
     # ---- Expenses ----------------------------------------------------
 
     async def list_expenses(self, user_id: str, trip_id: str | None = None) -> list[dict[str, Any]]:
@@ -140,9 +137,6 @@ class ExpensesMcpClient:
 
     async def get_expense(self, user_id: str, expense_id: str) -> dict[str, Any] | None:
         return await self.call("get_expense", {"userId": user_id, "expenseId": expense_id})
-
-    async def delete_expense(self, user_id: str, expense_id: str) -> bool:
-        return bool(await self.call("delete_expense", {"userId": user_id, "expenseId": expense_id}))
 
     # ---- Receipt images ---------------------------------------------
 
@@ -174,6 +168,11 @@ class ExpensesMcpClient:
         return result
 
     # ---- Conversations ----------------------------------------------
+
+    async def save_receipt_checkpoint(self, user_id: str, conversation_id: str, key: str, checkpoint: dict[str, Any]) -> None:
+        await self.call("save_receipt_checkpoint", {
+            "userId": user_id, "conversationId": conversation_id, "key": key, "checkpoint": checkpoint,
+        })
 
     async def list_conversations(self, user_id: str) -> list[dict[str, Any]]:
         return _as_list(await self.call("list_conversations", {"userId": user_id}))

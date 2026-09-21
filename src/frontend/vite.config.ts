@@ -4,7 +4,7 @@ import react from "@vitejs/plugin-react";
 /**
  * The AppHost injects agent and records URLs through Aspire service discovery.
  *
- * Proxy agent commands and chat separately from records and receipt photos.
+ * Proxy agent chat separately from records and receipt photos.
  * Same-origin browser requests also work from a phone on the LAN without CORS,
  * mixed content, or hard-coded localhost.
  */
@@ -33,7 +33,6 @@ export default defineConfig(() => {
 
   const proxy = {
     "/chat": { target: agentTarget, changeOrigin: true, secure: false },
-    "/commands": { target: agentTarget, changeOrigin: true, secure: false },
     "/health": { target: agentTarget, changeOrigin: true, secure: false },
     "/api": { target: recordsTarget, changeOrigin: true, secure: false },
   };

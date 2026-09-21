@@ -16,9 +16,11 @@ dependencies = [
     # YAML parsing (Content Understanding emits YAML)
     "pyyaml>=6.0",
     "pillow>=11",
+    "tiktoken>=0.12,<1",
 
     # HTTP client
     "httpx>=0.27",
+    "httpx2>=2,<3",
 
     # OpenTelemetry (HTTP/protobuf exporter - no grpcio build required)
     "opentelemetry-api>=1.33",
@@ -48,11 +50,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["expenses_agent"]
 
-[tool.hatch.build.hooks.custom]
-
 [tool.uv]
 prerelease = "allow"
 
 [project.scripts]
 expenses-agent = "expenses_agent.main:main"
-expenses-analyzer-bootstrap = "expenses_agent.bootstrap:main"
