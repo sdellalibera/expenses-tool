@@ -1,16 +1,10 @@
 using Expenses.Data;
-using ExpensesMcpServer;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 
 builder.AddExpensesData();
-if (!builder.Configuration.GetValue("Cosmos:UseInMemory", false))
-{
-    builder.Services.AddHostedService<CosmosInitializer>();
-}
-builder.Services.AddHostedService<ReceiptStorageInitializer>();
 
 builder.Services
     .AddMcpServer(options => options.ServerInfo = new() { Name = "expenses-mcp-server", Version = "1.0.0" })

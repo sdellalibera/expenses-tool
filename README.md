@@ -198,8 +198,10 @@ docs/
 
 The Vite dev server **proxies** `/chat` and `/health` to the agent,
 and `/api` to the read API (`vite.config.ts`), keeping requests same-origin.
-That is what lets you open the app
-from your phone on the same network without CORS or mixed-content problems.
+Local Aspire runs keep the frontend's localhost endpoint and add an authenticated
+HTTPS dev tunnel for phone access, including camera capture, without requiring
+the same network. Open the tunnel URL in the dashboard and sign in on your phone
+with the dev tunnel CLI account. See [phone setup](docs/SETUP.md#phone-access-over-https).
 
 Chat state survives navigation between views: drafts, attachments, conversation
 IDs and in-flight requests live in a shared React provider. This UI state is
@@ -336,9 +338,10 @@ expense counts and totals:
 
 All reads require `userId` and use its Cosmos partition. Photo downloads first
 resolve the expense in that partition and only accept URLs in the configured
-receipt container and that user's blob prefix. The API does not initialize or
-modify containers; MCP startup does that. It can keep serving reads when chat or
-Foundry is unavailable.
+receipt container and that user's blob prefix. Neither the API nor MCP initializes
+containers; Aspire provisions them from the AppHost declarations, both in the
+local emulators and in Azure. The API and MCP start independently once storage is
+ready. The API can keep serving reads when chat or Foundry is unavailable.
 
 ### Memory
 

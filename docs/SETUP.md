@@ -15,6 +15,7 @@ Everything needed to run this repository locally, in order. See
 | Podman | 5.x+ | `winget install RedHat.Podman` |
 | Azure CLI | 2.7x+ | `winget install Microsoft.AzureCLI` |
 | Aspire CLI | 13.5+ | `curl -sSL https://aspire.dev/install.sh \| bash` (or the Windows installer) |
+| Dev tunnel CLI | Latest | `winget install Microsoft.devtunnel` |
 
 This repo uses **Podman** as the container runtime. After installing:
 
@@ -173,19 +174,46 @@ cd src/aspire
 aspire run
 ```
 
-Aspire starts the Cosmos preview emulator and Azurite (Podman), then the MCP server
-(which creates the `db` database and the `trips` / `expenses` / `conversations`
-containers and private `receipt-images` blob container), the read API, Python
-agent, and Vite frontend. Independently of Python startup, `analyzer-setup` runs
-once per AppHost run after the model deployments are ready; existing analyzers
-are reported without modification. Wait for successful setup before uploading
-receipts to a new account. Open the dashboard URL it
-prints, then the **frontend** endpoint and go to `/home`.
+Aspire starts the Cosmos preview emulator and Azurite (Podman) and creates the
+`db` database, its `trips` / `expenses` / `conversations` containers, and the private
+`receipt-images` blob container from the AppHost declarations. The MCP server and
+read API start independently once storage is ready. Python waits for MCP and the
+chat model; its memory-model waits only apply when publishing with durable memory
+enabled. Vite starts without waiting for the backends, so early requests can fail
+until the corresponding service is ready; reload the page after startup if needed.
+Independently of Python startup, `analyzer-setup` runs once per AppHost run after
+the model deployments are ready; existing analyzers are reported without
+modification. Wait for successful setup before uploading receipts to a new account.
+Open the dashboard URL it prints, then the **frontend** endpoint and go to `/home`.
 
-To use it from a phone, open the frontend's external URL on the same network —
-the Vite dev server routes `/chat` and `/health` to the agent and
-`/api` to the read API, so no extra configuration is needed. When running
-services outside Aspire, `VITE_AGENT_API_URL` selects the agent (default
+When running services outside Aspire, provision the database and private containers
+beforehand. The services no longer create them on startup. Azure deployments keep
+blob public access disabled at the storage-account level.
+
+### Phone access over HTTPS
+
+Sign in once with `devtunnel user login` before starting Aspire. Local runs add
+an authenticated `frontend-tunnel` resource using Aspire's Dev Tunnels integration.
+The dashboard's **frontend** resource keeps both ways to reach the app:
+
+* The original `http://localhost:<port>` endpoint for your computer.
+* **Phone (HTTPS):** the `https://...devtunnels.ms/home` link for your phone.
+
+The **frontend-tunnel** resource also shows this link as **Frontend (HTTPS)**
+in its URLs section.
+
+Open the HTTPS tunnel URL on your phone, sign in with the same account used by
+the dev tunnel CLI, and go to `/home`. Allow camera access when prompted to take
+a receipt photo. HTTPS enables browser camera access; the phone does not need
+to be on the same network as your computer.
+
+Only the frontend endpoint is tunneled. Vite still routes `/chat` and `/health`
+to the agent and `/api` to the read API through same-origin requests. Anonymous
+access is not enabled because this demo can read and modify expense records.
+Stop `frontend-tunnel` in the dashboard or stop Aspire when the demo is finished.
+The tunnel is local-development-only and is not included when publishing.
+
+When running services outside Aspire, `VITE_AGENT_API_URL` selects the agent (default
 `http://localhost:8000`) and `VITE_RECORDS_API_URL` selects the read API (default
 `http://localhost:5291`). For direct cross-origin calls, `ALLOWED_ORIGINS` can
 restrict the origins accepted by each service (comma-separated); the demo

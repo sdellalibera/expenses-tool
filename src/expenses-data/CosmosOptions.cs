@@ -16,7 +16,4 @@ public sealed class CosmosOptions
     public string ExpensesContainer { get; set; } = "expenses";
 
     public string ConversationsContainer { get; set; } = "conversations";
-
-    /// <summary>Partition key path shared by every container.</summary>
-    public string PartitionKeyPath { get; set; } = "/userId";
 }

@@ -16,17 +16,6 @@ public sealed class ReceiptStorage(
     public const int MaxUploadBytes = 12 * 1024 * 1024;
     private BlobContainerClient Container => container;
 
-    public async Task InitializeAsync(CancellationToken cancellationToken)
-    {
-        await Container.CreateIfNotExistsAsync(PublicAccessType.None, cancellationToken: cancellationToken);
-        var access = await Container.GetAccessPolicyAsync(cancellationToken: cancellationToken);
-        if (access.Value.BlobPublicAccess != PublicAccessType.None)
-        {
-            throw new InvalidOperationException("The receipt-images container must not allow public access.");
-        }
-        logger.LogInformation("Private receipt container {Container} is ready", Container.Name);
-    }
-
     public async Task<ReceiptImage> UploadAsync(
         string userId, string conversationId, string fileName, string contentType, string base64Data,
         CancellationToken cancellationToken)

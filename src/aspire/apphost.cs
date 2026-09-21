@@ -98,7 +98,6 @@ var recordsApi = builder.AddProject("expenses-api", "../expenses-api/expenses-ap
     .WithRoleAssignments(storage, StorageBuiltInRole.StorageBlobDataReader)
     .WaitFor(cosmos)
     .WaitFor(receiptImages)
-    .WaitFor(mcpServer) // The MCP startup initializers create the shared containers.
     .WithEnvironment("Cosmos__DatabaseName", DatabaseName)
     .WithEnvironment("Cosmos__TripsContainer", TripsContainer)
     .WithEnvironment("Cosmos__ExpensesContainer", ExpensesContainer)
@@ -114,8 +113,8 @@ var expensesAgent = builder.AddPythonApp(
         appDirectory: "../python-agent",
         scriptPath: "expenses_agent/main.py")
     .WithReference(chatModel).WaitFor(chatModel)
-    .WithReference(miniModel).WaitFor(miniModel)
-    .WithReference(embeddingModel).WaitFor(embeddingModel)
+    .WithReference(miniModel)
+    .WithReference(embeddingModel)
     .WithReference(mcpServer).WaitFor(mcpServer)
     // The durable-memory provider (Agent Memory Toolkit) reads and writes its own
     // Cosmos containers directly; trips and expenses still go through the MCP server.
@@ -154,7 +153,8 @@ if (builder.ExecutionContext.IsRunMode)
 if (builder.ExecutionContext.IsPublishMode)
 {
     expensesAgent.WithReference(cosmos)
-        .WaitFor(cosmos)
+        .WaitFor(miniModel)
+        .WaitFor(embeddingModel)
         .WithEnvironment("COSMOS_DATABASE", DatabaseName);
     expensesAgent.PublishAsDockerFile(container =>
         container.WithDockerfile("..", "python-agent/Dockerfile"));
@@ -164,11 +164,10 @@ if (builder.ExecutionContext.IsPublishMode)
 // ---------------------------------------------------------------------------
 // Vite routes /api to the read API and /chat, /health to the agent.
 // ---------------------------------------------------------------------------
-builder.AddViteApp("frontend", "../frontend")
+var frontend = builder.AddViteApp("frontend", "../frontend")
     .WithNpm()
     .WithReference(expensesAgent)
     .WithReference(recordsApi)
-    .WaitFor(recordsApi)
     .WithExternalHttpEndpoints();
 
 builder.Build().Run();
