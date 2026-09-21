@@ -150,22 +150,33 @@ public sealed class InMemoryExpensesRepository : IExpensesRepository
     {
         using var activity = Telemetry.StartRecordActivity("append", "conversation", userId, conversationId);
 
-        var conversation = _conversations.GetValueOrDefault(Key(userId, conversationId))
-            ?? new Conversation
-            {
-                Id = conversationId,
-                UserId = userId,
-                Title = title ?? ConversationTitle.FromMessages(messages),
-            };
-
-        conversation.Messages = [.. conversation.Messages, .. messages];
-        conversation.Title = title ?? (conversation.Title == "New conversation" ? ConversationTitle.FromMessages(messages) : conversation.Title);
-        conversation.TripId = tripId ?? conversation.TripId;
-        conversation.UpdatedAt = DateTimeOffset.UtcNow;
-
-        _conversations[Key(userId, conversationId)] = conversation;
+        Conversation Append(Conversation existing) => existing with
+        {
+            Messages = [.. existing.Messages, .. messages],
+            Title = title ?? (existing.Title == "New conversation" ? ConversationTitle.FromMessages(messages) : existing.Title),
+            TripId = tripId ?? existing.TripId,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        var conversation = _conversations.AddOrUpdate(Key(userId, conversationId),
+            _ => Append(new Conversation { Id = conversationId, UserId = userId }),
+            (_, existing) => Append(existing));
 
         return Task.FromResult(conversation);
+    }
+
+    public Task SaveReceiptCheckpointAsync(string userId, string conversationId, string key,
+        ReceiptCheckpoint checkpoint, CancellationToken cancellationToken = default)
+    {
+        Conversation Save(Conversation existing)
+        {
+            var updated = existing with { UpdatedAt = DateTimeOffset.UtcNow };
+            updated.SetReceiptCheckpoint(key, checkpoint);
+            return updated;
+        }
+        _conversations.AddOrUpdate(Key(userId, conversationId),
+            _ => Save(new Conversation { Id = conversationId, UserId = userId }),
+            (_, existing) => Save(existing));
+        return Task.CompletedTask;
     }
 
     public Task<Conversation?> GetConversationAsync(string userId, string conversationId, CancellationToken cancellationToken = default)

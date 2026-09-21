@@ -1,5 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 
+import { ChatSessionProvider } from "./hooks/useChatSession";
+
 /** Shell around every page: brand, primary navigation and the routed content. */
 export default function App() {
   return (
@@ -27,7 +29,9 @@ export default function App() {
       </header>
 
       <main className="app-main">
-        <Outlet />
+        <ChatSessionProvider>
+          <Outlet />
+        </ChatSessionProvider>
       </main>
     </div>
   );

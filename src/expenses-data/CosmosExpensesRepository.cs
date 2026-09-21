@@ -243,26 +243,52 @@ public sealed class CosmosExpensesRepository : IExpensesRepository
     {
         using var activity = Telemetry.StartRecordActivity("append", "conversation", userId, conversationId);
 
-        var existing = await ReadOrDefaultAsync<Conversation>(Conversations, conversationId, userId, cancellationToken)
-            ?? new Conversation
+        return await MutateConversationAsync(userId, conversationId, existing =>
+        {
+            existing.Messages = [.. existing.Messages, .. messages];
+            existing.Title = title ?? (existing.Title == "New conversation" ? ConversationTitle.FromMessages(messages) : existing.Title);
+            existing.TripId = tripId ?? existing.TripId;
+        }, cancellationToken);
+    }
+
+    public async Task SaveReceiptCheckpointAsync(string userId, string conversationId, string key,
+        ReceiptCheckpoint checkpoint, CancellationToken cancellationToken = default)
+    {
+        using var activity = Telemetry.StartRecordActivity("checkpoint", "conversation", userId, conversationId);
+        await MutateConversationAsync(userId, conversationId, conversation => conversation.SetReceiptCheckpoint(key, checkpoint), cancellationToken);
+    }
+
+    private async Task<Conversation> MutateConversationAsync(string userId, string conversationId,
+        Action<Conversation> mutate, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            Conversation conversation;
+            string? etag = null;
+            try
             {
-                Id = conversationId,
-                UserId = userId,
-                Title = title ?? ConversationTitle.FromMessages(messages),
-            };
-
-        existing.Messages = [.. existing.Messages, .. messages];
-        existing.Title = title ?? (existing.Title == "New conversation" ? ConversationTitle.FromMessages(messages) : existing.Title);
-        existing.TripId = tripId ?? existing.TripId;
-        existing.UpdatedAt = DateTimeOffset.UtcNow;
-
-        var response = await Conversations.UpsertItemAsync(existing, new PartitionKey(userId), cancellationToken: cancellationToken);
-
-        _logger.LogInformation(
-            "Appended {Count} message(s) to conversation {ConversationId} for user {UserId} [{RequestCharge} RU]",
-            messages.Count, conversationId, userId, response.RequestCharge);
-
-        return response.Resource;
+                var read = await Conversations.ReadItemAsync<Conversation>(conversationId, new PartitionKey(userId), cancellationToken: cancellationToken);
+                conversation = read.Resource;
+                etag = read.ETag;
+            }
+            catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+            {
+                conversation = new Conversation { Id = conversationId, UserId = userId };
+            }
+            mutate(conversation);
+            conversation.UpdatedAt = DateTimeOffset.UtcNow;
+            try
+            {
+                var response = etag is null
+                    ? await Conversations.CreateItemAsync(conversation, new PartitionKey(userId), cancellationToken: cancellationToken)
+                    : await Conversations.ReplaceItemAsync(conversation, conversationId, new PartitionKey(userId),
+                        new ItemRequestOptions { IfMatchEtag = etag }, cancellationToken);
+                return response.Resource;
+            }
+            catch (CosmosException ex) when (attempt < 4 && ex.StatusCode is HttpStatusCode.Conflict or HttpStatusCode.PreconditionFailed)
+            {
+            }
+        }
     }
 
     public async Task<Conversation?> GetConversationAsync(string userId, string conversationId, CancellationToken cancellationToken = default)

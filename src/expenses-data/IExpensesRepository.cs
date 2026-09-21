@@ -22,6 +22,9 @@ public interface IExpensesRepository : IExpensesReader
     Task<bool> DeleteExpenseAsync(string userId, string expenseId, CancellationToken cancellationToken = default);
 
     // ---- Conversations ----------------------------------------------
+    Task SaveReceiptCheckpointAsync(string userId, string conversationId, string key,
+        ReceiptCheckpoint checkpoint, CancellationToken cancellationToken = default);
+
     Task<Conversation> AppendConversationMessagesAsync(
         string userId,
         string conversationId,

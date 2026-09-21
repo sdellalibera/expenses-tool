@@ -18,6 +18,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly retryAfterSeconds: number | null = null,
   ) {
     super(message);
     this.name = "ApiError";
@@ -35,7 +36,8 @@ async function request<T>(base: string, path: string, init?: RequestInit): Promi
     } catch {
       /* keep the status line */
     }
-    throw new ApiError(detail, response.status);
+    const retryAfter = Number(response.headers.get("Retry-After"));
+    throw new ApiError(detail, response.status, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null);
   }
 
   if (response.status === 204) return undefined as T;
@@ -78,13 +80,6 @@ export const api = {
   getTrip: (userId: string, tripId: string) =>
     request<TripSummary>(RECORDS_API_BASE, `/api/trips/${encodeURIComponent(tripId)}${query({ userId })}`),
 
-  deleteTrip: (userId: string, tripId: string) =>
-    request<{ deleted: boolean }>(
-      AGENT_API_BASE,
-      `/commands/trips/${encodeURIComponent(tripId)}${query({ userId })}`,
-      { method: "DELETE" },
-    ),
-
   listExpenses: (userId: string, tripId?: string) =>
     request<Expense[]>(RECORDS_API_BASE, `/api/expenses${query({ userId, tripId })}`),
 
@@ -93,13 +88,6 @@ export const api = {
 
   expensePhotoUrl: (userId: string, expenseId: string) =>
     `${RECORDS_API_BASE}/api/expenses/${encodeURIComponent(expenseId)}/photo${query({ userId })}`,
-
-  deleteExpense: (userId: string, expenseId: string) =>
-    request<{ deleted: boolean }>(
-      AGENT_API_BASE,
-      `/commands/expenses/${encodeURIComponent(expenseId)}${query({ userId })}`,
-      { method: "DELETE" },
-    ),
 
   listConversations: (userId: string) =>
     request<ConversationSummary[]>(RECORDS_API_BASE, `/api/conversations${query({ userId })}`),

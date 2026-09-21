@@ -53,12 +53,11 @@ class Settings:
 
     foundry_endpoint: str | None = None
     foundry_deployment: str | None = None
+    model_max_output_tokens: int = 2048
+    model_reasoning_effort: str = "low"
+    model_max_retries: int = 2
     content_understanding_endpoint: str | None = None
     analyzer_id: str = "ExpensesAnalyzer"
-    content_understanding_completion_deployment: str = "gpt5"
-    content_understanding_mini_deployment: str = "gpt5mini"
-    content_understanding_embedding_deployment: str = "TextEmbedding3Large"
-    content_understanding_bootstrap_timeout: float = 300.0
     # Which sections of the Content Understanding analysis reach the model.
     # "fields" only keeps the structured receipt fields and drops the full page
     # markdown, which is what `to_llm_input` strips the raw analysis down to.
@@ -79,6 +78,8 @@ class Settings:
     enable_sensitive_telemetry: bool = True
     allowed_origins: list[str] = field(default_factory=lambda: ["*"])
     max_history_messages: int = 40
+    max_history_tokens: int = 4096
+    receipt_cache_version: str = "1"
 
     @property
     def mcp_endpoint(self) -> str | None:
@@ -97,6 +98,9 @@ class Settings:
         return {
             "foundryEndpoint": self.foundry_endpoint,
             "foundryDeployment": self.foundry_deployment,
+            "modelMaxOutputTokens": self.model_max_output_tokens,
+            "modelReasoningEffort": self.model_reasoning_effort,
+            "maxHistoryTokens": self.max_history_tokens,
             "contentUnderstandingEndpoint": self.content_understanding_endpoint,
             "analyzerId": self.analyzer_id,
             "contentUnderstandingSections": self.content_understanding_sections,
@@ -118,10 +122,23 @@ def load_settings() -> Settings:
 
     # Foundry: Aspire hands the model deployment over as a connection string.
     connection = _parse_connection_string(
-        _first_env("ConnectionStrings__gpt5", "ConnectionStrings__foundry", default="") or ""
+        _first_env("ConnectionStrings__gpt5-4", "ConnectionStrings__foundry", default="") or ""
     )
     settings.foundry_endpoint = _first_env("FOUNDRY_ENDPOINT", "FOUNDRY_PROJECT_ENDPOINT") or connection.get("endpoint")
     settings.foundry_deployment = _first_env("FOUNDRY_DEPLOYMENT", "FOUNDRY_MODEL") or connection.get("deployment") or connection.get("model")
+    settings.model_max_output_tokens = int(_first_env("MODEL_MAX_OUTPUT_TOKENS", default="2048"))
+    settings.model_reasoning_effort = _first_env("MODEL_REASONING_EFFORT", default="low")
+    settings.model_max_retries = int(_first_env("MODEL_MAX_RETRIES", default="2"))
+    settings.max_history_tokens = int(_first_env("MAX_HISTORY_TOKENS", default="4096"))
+    settings.receipt_cache_version = _first_env("RECEIPT_CACHE_VERSION", default="1")
+    if not 256 <= settings.max_history_tokens <= 32768:
+        raise ValueError("MAX_HISTORY_TOKENS must be between 256 and 32768.")
+    if not 256 <= settings.model_max_output_tokens <= 16384:
+        raise ValueError("MODEL_MAX_OUTPUT_TOKENS must be between 256 and 16384.")
+    if settings.model_reasoning_effort not in {"none", "low", "medium", "high"}:
+        raise ValueError("MODEL_REASONING_EFFORT must be none, low, medium or high.")
+    if not 0 <= settings.model_max_retries <= 5:
+        raise ValueError("MODEL_MAX_RETRIES must be between 0 and 5.")
 
     settings.content_understanding_endpoint = _first_env(
         "contentUnderstandingEndpoint",
@@ -129,24 +146,8 @@ def load_settings() -> Settings:
         "AZURE_CONTENTUNDERSTANDING_ENDPOINT",
     )
     settings.analyzer_id = _first_env("CONTENT_UNDERSTANDING_ANALYZER_ID", default="ExpensesAnalyzer") or "ExpensesAnalyzer"
-    mini = _parse_connection_string(_first_env("ConnectionStrings__gpt5mini", default="") or "")
     embedding = _parse_connection_string(
         _first_env("ConnectionStrings__TextEmbedding3Large", "ConnectionStrings__textembedding3large", default="") or ""
-    )
-    settings.content_understanding_completion_deployment = (
-        _first_env("CONTENT_UNDERSTANDING_COMPLETION_DEPLOYMENT", "CU_COMPLETION_MODEL_DEPLOYMENT")
-        or connection.get("deployment") or settings.foundry_deployment or "gpt5"
-    )
-    settings.content_understanding_mini_deployment = (
-        _first_env("CONTENT_UNDERSTANDING_MINI_DEPLOYMENT", "CU_COMPLETION_MINI_DEPLOYMENT")
-        or mini.get("deployment") or mini.get("model") or "gpt5mini"
-    )
-    settings.content_understanding_embedding_deployment = (
-        _first_env("CONTENT_UNDERSTANDING_EMBEDDING_DEPLOYMENT", "CU_EMBEDDING_DEPLOYMENT")
-        or embedding.get("deployment") or embedding.get("model") or "TextEmbedding3Large"
-    )
-    settings.content_understanding_bootstrap_timeout = float(
-        _first_env("CONTENT_UNDERSTANDING_BOOTSTRAP_TIMEOUT", default="300") or "300"
     )
 
     sections = _first_env("CONTENT_UNDERSTANDING_OUTPUT_SECTIONS")
